@@ -518,11 +518,13 @@ The main UI is `MainActivity`, which shows two tabs/sections:
 
 ### 7.1 Hidden Apps List (default view)
 
+- **Search bar** at the top — filters the hidden apps list by app name in real time
 - RecyclerView showing all currently hidden apps
 - Each row shows: **app icon** | **app name** | **package name** (dimmed) | **unhide button**
-- Long-press on a row opens options: Unhide, Set Hotkey, Launch
+- Tapping a row launches the app (auth → unhide → launch → rehide on switch)
+- Long-press on a row opens options: Unhide, Set Hotkey, Create Shortcut
 - **Floating Action Button (FAB)** → opens the App Picker to add apps
-- Empty state: centered message "No hidden apps. Tap + to hide an app."
+- Empty state: centered message "No hidden apps. Tap + to hide an app." (search bar hidden when list is empty)
 
 ### 7.2 App Picker Dialog (add apps to hidden list)
 
@@ -554,6 +556,8 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 ┌──────────────────────────────────┐
 │ Toolbar: "Lokker"     [⚙ gear]  │
 ├──────────────────────────────────┤
+│ 🔍 Filter apps...               │
+├──────────────────────────────────┤
 │                                  │
 │  ┌──────────────────────────┐    │
 │  │ 📱 WhatsApp              │    │
@@ -569,8 +573,10 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 │                          [+ FAB] │
 └──────────────────────────────────┘
 
+🔍 = search/filter field (filters by app name)
 [⊘] = unhide button
 [+ FAB] = open app picker
+Tap row = launch app (auth → unhide → launch → rehide)
 ```
 
 ### App Picker Dialog
@@ -1066,7 +1072,7 @@ packages/apps/Lokker/
 │   ├── drawable/
 │   │   └── ic_launcher.xml
 │   ├── layout/
-│   │   ├── activity_main.xml          # hidden apps list + FAB
+│   │   ├── activity_main.xml          # search bar + hidden apps list + FAB
 │   │   ├── activity_auth.xml          # PIN entry screen
 │   │   ├── activity_setup.xml         # first-run password setup
 │   │   ├── activity_hotkey_setup.xml   # hotkey recording
@@ -1095,7 +1101,7 @@ packages/apps/Lokker/
         │   ├── SetupActivity.java          # first-run password setup
         │   ├── HotkeySetupActivity.java    # record key sequences
         │   ├── AppPickerDialog.java        # searchable app picker (add to hidden)
-        │   ├── LokkerViewModel.java        # LiveData for hidden apps list
+        │   ├── LokkerViewModel.java        # LiveData for hidden apps list + search filter
         │   └── adapter/
         │       ├── HiddenAppsAdapter.java  # RecyclerView adapter for main list
         │       └── AppPickerAdapter.java   # RecyclerView adapter for picker
@@ -1203,7 +1209,7 @@ packages/apps/Lokker/
 - `AppPickerDialog`: searchable list of all installed apps
 - `AppPickerAdapter` with checkbox multi-select
 - "Show system apps" toggle in picker
-- `LokkerViewModel` with LiveData from Room DAO
+- `LokkerViewModel` with LiveData from Room DAO + `MutableLiveData<String>` search query filter via `Transformations.switchMap`
 - Empty state for no hidden apps
 
 ### Phase 4 — Auth Layer (~2 days)
