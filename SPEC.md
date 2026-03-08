@@ -960,3 +960,96 @@ packages/apps/Lokker/
 - `ScreenReceiver`: on unlock re-check all hidden state integrity
 
 **Total estimate: ~18 developer-days for solo dev**
+
+---
+
+## Shelved — Framework Patch: Intercept ActivityNotFoundException
+
+**Status:** Shelved for future consideration
+**Rationale:** Enables seamless integration with key remappers (e.g., KeyMapper) without requiring users to configure a proxy activity. The remapper can target the real hidden app component directly — Lokker intercepts the failed launch and handles auth + unhide automatically.
+
+### Problem
+
+When an app is hidden via `setApplicationHiddenSetting`, its components are invisible to `PackageManager.resolveActivity()`. Any external tool (key remapper, shortcut launcher) that tries to launch the hidden app gets `ActivityNotFoundException`. As a system app, Lokker **cannot** intercept this — `IActivityController.activityStarting()` only fires for successfully resolved activities, and the exception is thrown client-side in the caller's process.
+
+### Solution: LineageOS framework patch
+
+Add ~15 lines to `ActivityStarter.java` in the LineageOS source tree. When intent resolution fails and the target package is installed-but-hidden, broadcast the failed intent so Lokker can intercept it.
+
+#### Framework side (packages/services/core)
+
+**File:** `frameworks/base/services/core/java/com/android/server/wm/ActivityStarter.java`
+
+In `executeRequest()`, where `START_INTENT_NOT_RESOLVED` is returned after `aInfo == null`:
+
+```java
+// After: if (aInfo == null) { ... }
+// Check if the target is a hidden (not uninstalled) package
+if (aInfo == null && intent.getComponent() != null) {
+    String targetPkg = intent.getComponent().getPackageName();
+    try {
+        PackageManager pm = mService.mContext.getPackageManager();
+        // getApplicationInfo with MATCH_HIDDEN flag — only works for hidden apps
+        ApplicationInfo ai = pm.getApplicationInfo(targetPkg,
+            PackageManager.MATCH_UNINSTALLED_PACKAGES);
+        if (ai != null) {
+            Intent failedBroadcast = new Intent("android.intent.action.ACTIVITY_NOT_RESOLVED");
+            failedBroadcast.putExtra("original_intent", intent);
+            failedBroadcast.putExtra("calling_package", callingPackage);
+            failedBroadcast.setPackage("com.lokker.app");  // targeted — only Lokker receives
+            failedBroadcast.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            mService.mContext.sendBroadcastAsUser(failedBroadcast,
+                UserHandle.of(userId),
+                android.Manifest.permission.MANAGE_USERS);
+        }
+    } catch (PackageManager.NameNotFoundException ignored) {
+        // Truly uninstalled — no broadcast needed
+    }
+}
+```
+
+#### Lokker side (receiver)
+
+**File:** `src/com/lokker/app/receiver/ActivityNotResolvedReceiver.java`
+
+```java
+public class ActivityNotResolvedReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        Intent original = intent.getParcelableExtra("original_intent", Intent.class);
+        if (original == null || original.getComponent() == null) return;
+
+        String targetPkg = original.getComponent().getPackageName();
+        AppRepository repo = AppRepository.getInstance(context);
+
+        if (repo.isHiddenApp(targetPkg)) {
+            // Launch auth gate → on success: unhide + launch original intent
+            Intent auth = new Intent(context, AuthActivity.class);
+            auth.putExtra("target_package", targetPkg);
+            auth.putExtra("original_intent", original);
+            auth.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+            context.startActivity(auth);
+        }
+    }
+}
+```
+
+**Manifest entry:**
+
+```xml
+<receiver android:name=".receiver.ActivityNotResolvedReceiver"
+    android:permission="android.permission.MANAGE_USERS"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.ACTIVITY_NOT_RESOLVED"/>
+    </intent-filter>
+</receiver>
+```
+
+### Why shelved
+
+- Requires maintaining a framework patch across LineageOS updates
+- Adds coupling between Lokker and a custom ROM build
+- The proxy-activity approach (Variant A) works without framework changes
+- Can be revisited once the core app is stable and tested
