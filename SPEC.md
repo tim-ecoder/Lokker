@@ -53,7 +53,7 @@ Single-module Java app. MVVM-lite pattern. No external dependencies beyond Andro
 │              AppRepository (single source of truth)         │
 ├────────────────────────────┬────────────────────────────────┤
 │       LokkerDatabase       │    EncryptedPreferences        │
-│  Room: HiddenApp, HotkeyMap│  auth hash, self-hide,        │
+│  Room: LokkerApp, HotkeyMap│  auth hash, self-hide,        │
 │                            │  pendingRehide set             │
 └────────────────────────────┴────────────────────────────────┘
 ```
@@ -98,26 +98,69 @@ Core hiding uses the `@hide` API `PackageManager.setApplicationHiddenSetting()` 
 
 `setApplicationHiddenSetting()` requires `MANAGE_USERS` (signature|privileged). Since Lokker is built with `certificate: "platform"` in the AOSP tree, this permission is granted automatically. Must also be whitelisted in `privapp-permissions-lokker.xml`.
 
-### hideApp(packageName)
+### addApplication(packageName)
+
+Adds an app to Lokker's managed list. The app is now password-protected — it can only be opened through Lokker. Caches icon/label, persists to Room, and creates a pinned shortcut. Does **not** hide the app yet; call `hideApp()` separately.
 
 ```java
 // AppRepository.java
 
-public void hideApp(String packageName) {
-    // Cache app label BEFORE hiding (queries won't work after)
+public void addApplication(String packageName) {
+    // Cache label and icon (PM queries work while app is still visible)
     String label = getAppLabel(packageName);
+    cacheAppIcon(packageName);
 
-    // System-level hide — app disappears from Settings, pm list, all queries
-    pm.setApplicationHiddenSetting(packageName, true);
-
-    // Persist to Room for our own tracking (hotkeys, labels, etc.)
-    HiddenApp record = new HiddenApp(
+    // Persist to Room — app is now managed by Lokker
+    LokkerApp record = new LokkerApp(
         packageName,
         label,
         null, // hotkeySequence
+        false, // hidden
         System.currentTimeMillis()
     );
-    db.hiddenAppDao().insert(record);
+    db.lokkerAppDao().insert(record);
+
+    // Auto-create pinned shortcut on home screen
+    createPinnedShortcut(packageName);
+}
+```
+
+### removeApplication(packageName)
+
+Removes an app from Lokker entirely. Unhides if hidden, deletes from Room, removes pinned shortcut, cleans up cached icon. The app returns to normal (no longer password-protected).
+
+```java
+// AppRepository.java
+
+public void removeApplication(String packageName) {
+    // Unhide at system level if currently hidden
+    pm.setApplicationHiddenSetting(packageName, false);
+
+    // Remove from Room
+    db.lokkerAppDao().delete(packageName);
+    pendingRehide.remove(packageName);
+    persistPendingRehide();
+
+    // Remove pinned shortcut
+    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
+    sm.disableShortcuts(List.of("lokker_" + packageName));
+
+    // Clean up cached icon
+    new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
+}
+```
+
+### hideApp(packageName)
+
+Hides an app that is already added to Lokker. The app disappears from launcher, Settings, and all PM queries.
+
+```java
+public void hideApp(String packageName) {
+    LokkerApp record = db.lokkerAppDao().get(packageName);
+    if (record == null) return; // must be added first
+
+    pm.setApplicationHiddenSetting(packageName, true);
+    db.lokkerAppDao().setHidden(packageName, true);
 }
 ```
 
@@ -128,16 +171,29 @@ public void hideApp(String packageName) {
 > m.invoke(pm, packageName, true);
 > ```
 
+### unhideApp(packageName)
+
+Unhides an app but keeps it in Lokker's list (still password-protected). The app reappears in launcher/Settings but can only be opened through Lokker.
+
+```java
+public void unhideApp(String packageName) {
+    LokkerApp record = db.lokkerAppDao().get(packageName);
+    if (record == null) return;
+
+    pm.setApplicationHiddenSetting(packageName, false);
+    db.lokkerAppDao().setHidden(packageName, false);
+}
+```
+
 ### unhideTemporarily(packageName)
 
 Called before launching a hidden app through Lokker UI. Unhides the entire application; `LokkerAccessibilityService` will rehide when the app loses foreground.
 
 ```java
 public boolean unhideTemporarily(String packageName) {
-    HiddenApp record = db.hiddenAppDao().get(packageName);
-    if (record == null) return false;
+    LokkerApp record = db.lokkerAppDao().get(packageName);
+    if (record == null || !record.hidden) return false;
 
-    // Unhide at system level — app becomes fully functional
     pm.setApplicationHiddenSetting(packageName, false);
 
     // Persist pending state to survive process death
@@ -145,21 +201,6 @@ public boolean unhideTemporarily(String packageName) {
     persistPendingRehide();
 
     return true;
-}
-```
-
-### unhideApp(packageName) — permanent unhide
-
-Called when user removes an app from the hidden list via the GUI.
-
-```java
-public void unhideApp(String packageName) {
-    // Unhide at system level
-    pm.setApplicationHiddenSetting(packageName, false);
-
-    db.hiddenAppDao().delete(packageName);
-    pendingRehide.remove(packageName);
-    persistPendingRehide();
 }
 ```
 
@@ -601,17 +642,17 @@ Tap row = launch app (auth → unhide → launch → rehide)
 
 ### 7.5 Pinned Shortcuts for Hidden Apps
 
-Lokker **automatically creates a pinned home-screen shortcut** when an app is added to the hidden list, and **automatically removes it** when the app is unhidden. Each shortcut routes through `AuthActivity`, so tapping it triggers auth → unhide → launch → rehide-on-switch. This also enables key remappers (KeyMapper, etc.) to trigger hidden apps without needing a framework patch — the remapper simply targets the pinned shortcut.
+Lokker **automatically creates a pinned home-screen shortcut** when an app is added to Lokker via `addApplication()`, and **automatically removes it** when the app is removed via `removeApplication()`. Each shortcut routes through `AuthActivity`, so tapping it triggers auth → unhide → launch → rehide-on-switch. This also enables key remappers (KeyMapper, etc.) to trigger hidden apps without needing a framework patch — the remapper simply targets the pinned shortcut.
 
 #### Automatic shortcut creation
 
-Called automatically by `hideApp()` after hiding the app.
+Called automatically by `addApplication()`.
 
 ```java
 // AppRepository.java
 
 public void createPinnedShortcut(String packageName) {
-    HiddenApp record = db.hiddenAppDao().get(packageName);
+    LokkerApp record = db.lokkerAppDao().get(packageName);
     if (record == null) return;
 
     ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
@@ -677,81 +718,46 @@ private Bitmap drawableToBitmap(Drawable drawable) {
 }
 ```
 
-Update `hideApp()` to cache the icon:
+Icon caching and shortcut creation are handled by `addApplication()`. Shortcut removal and icon cleanup are handled by `removeApplication()`. See Section 3.
+
+### unhideAll() / rehideAll()
+
+Used by the hide-all/unhide-all toggle in Settings. Operates only on the `hidden` flag — apps stay in Lokker's managed list.
 
 ```java
-public void hideApp(String packageName) {
-    String label = getAppLabel(packageName);
-    cacheAppIcon(packageName);  // cache icon BEFORE hiding
-
-    pm.setApplicationHiddenSetting(packageName, true);
-
-    HiddenApp record = new HiddenApp(packageName, label, null, System.currentTimeMillis());
-    db.hiddenAppDao().insert(record);
-
-    // Auto-create pinned shortcut
-    createPinnedShortcut(packageName);
-}
-```
-
-#### Automatic shortcut removal
-
-When an app is unhidden, remove its pinned shortcut and cached icon:
-
-```java
-// AppRepository.java
-
-public void unhideApp(String packageName) {
-    pm.setApplicationHiddenSetting(packageName, false);
-    db.hiddenAppDao().delete(packageName);
-    pendingRehide.remove(packageName);
-    persistPendingRehide();
-
-    // Remove pinned shortcut
-    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-    sm.disableShortcuts(List.of("lokker_" + packageName));
-
-    // Clean up cached icon
-    new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
-}
-
 public void unhideAll() {
-    List<HiddenApp> allApps = db.hiddenAppDao().getAllSync();
-    if (allApps.isEmpty()) return;
+    List<LokkerApp> hiddenApps = db.lokkerAppDao().getAllHidden();
+    if (hiddenApps.isEmpty()) return;
 
-    // Snapshot the list so we can re-hide later
-    saveUnhideAllSnapshot(allApps);
+    // Snapshot the package names so we can re-hide later
+    saveUnhideAllSnapshot(hiddenApps);
 
-    for (HiddenApp app : allApps) {
+    for (LokkerApp app : hiddenApps) {
         pm.setApplicationHiddenSetting(app.packageName, false);
-        // Keep pinned shortcuts intact — user may re-hide via toggle
-        // Keep cached icons — needed if user re-hides
+        db.lokkerAppDao().setHidden(app.packageName, false);
+        // Keep pinned shortcuts and cached icons intact
     }
 
-    // Bulk cleanup
-    db.hiddenAppDao().deleteAll();
     pendingRehide.clear();
     persistPendingRehide();
 }
 
-/**
- * Re-hide all apps from the last unhideAll() snapshot.
- * Only available while the snapshot exists.
- */
 public void rehideAll() {
-    List<HiddenApp> snapshot = loadUnhideAllSnapshot();
+    List<String> snapshot = loadUnhideAllSnapshot();
     if (snapshot == null || snapshot.isEmpty()) return;
 
-    for (HiddenApp app : snapshot) {
-        // Verify app is still installed before re-hiding
+    for (String pkg : snapshot) {
+        LokkerApp record = db.lokkerAppDao().get(pkg);
+        if (record == null) continue; // was removed from Lokker
+
         try {
-            pm.getPackageInfo(app.packageName, 0);
+            pm.getPackageInfo(pkg, 0);
         } catch (PackageManager.NameNotFoundException e) {
-            continue; // app was uninstalled, skip
+            continue; // app was uninstalled
         }
 
-        pm.setApplicationHiddenSetting(app.packageName, true);
-        db.hiddenAppDao().insert(app);
+        pm.setApplicationHiddenSetting(pkg, true);
+        db.lokkerAppDao().setHidden(pkg, true);
     }
 
     clearUnhideAllSnapshot();
@@ -759,32 +765,22 @@ public void rehideAll() {
 
 // --- Snapshot persistence (EncryptedSharedPreferences) ---
 
-private void saveUnhideAllSnapshot(List<HiddenApp> apps) {
+private void saveUnhideAllSnapshot(List<LokkerApp> apps) {
     JSONArray arr = new JSONArray();
-    for (HiddenApp app : apps) {
-        JSONObject obj = new JSONObject();
-        obj.put("packageName", app.packageName);
-        obj.put("appLabel", app.appLabel);
-        obj.put("hiddenAt", app.hiddenAt);
-        arr.put(obj);
+    for (LokkerApp app : apps) {
+        arr.put(app.packageName);
     }
     prefs.edit().putString("unhide_all_snapshot", arr.toString()).apply();
 }
 
-private List<HiddenApp> loadUnhideAllSnapshot() {
+private List<String> loadUnhideAllSnapshot() {
     String json = prefs.getString("unhide_all_snapshot", null);
     if (json == null) return null;
 
-    List<HiddenApp> result = new ArrayList<>();
+    List<String> result = new ArrayList<>();
     JSONArray arr = new JSONArray(json);
     for (int i = 0; i < arr.length(); i++) {
-        JSONObject obj = arr.getJSONObject(i);
-        result.add(new HiddenApp(
-            obj.getString("packageName"),
-            obj.getString("appLabel"),
-            null,  // hotkey not preserved in snapshot
-            obj.getLong("hiddenAt")
-        ));
+        result.add(arr.getString(i));
     }
     return result;
 }
@@ -913,17 +909,19 @@ private void launchAuth(String targetPackage) {
 ### Room Database
 
 ```java
-// HiddenApp.java — Entity
-// NOTE: No disabledComponents field needed — setApplicationHiddenSetting
-// hides the entire application at the system level.
-@Entity(tableName = "hidden_apps")
-public class HiddenApp {
+// LokkerApp.java — Entity
+// Represents an app managed by Lokker. Can be in hidden or unhidden state.
+// When added to Lokker, the app requires Lokker's password to open.
+// When hidden, it is also invisible at the system level.
+@Entity(tableName = "lokker_apps")
+public class LokkerApp {
     @PrimaryKey @NonNull
     public String packageName;
     public String appLabel;
     @TypeConverters(Converters.class)
     public List<Integer> hotkeySequence; // nullable, per-app hotkey
-    public long hiddenAt;
+    public boolean hidden;               // true = system-level hidden
+    public long addedAt;
 }
 
 // HotkeyMap.java — Entity
@@ -935,31 +933,37 @@ public class HotkeyMap {
     public List<Integer> lokkerHotkey;
 }
 
-// HiddenAppDao.java
+// LokkerAppDao.java
 @Dao
-public interface HiddenAppDao {
-    @Query("SELECT * FROM hidden_apps ORDER BY hiddenAt DESC")
-    LiveData<List<HiddenApp>> getAllLive();
+public interface LokkerAppDao {
+    @Query("SELECT * FROM lokker_apps ORDER BY addedAt DESC")
+    LiveData<List<LokkerApp>> getAllLive();
 
-    @Query("SELECT * FROM hidden_apps")
-    List<HiddenApp> getAll();
+    @Query("SELECT * FROM lokker_apps")
+    List<LokkerApp> getAll();
 
-    @Query("SELECT * FROM hidden_apps WHERE packageName = :pkg")
-    HiddenApp get(String pkg);
+    @Query("SELECT * FROM lokker_apps WHERE packageName = :pkg")
+    LokkerApp get(String pkg);
 
-    @Query("SELECT COUNT(*) > 0 FROM hidden_apps WHERE packageName = :pkg")
+    @Query("SELECT COUNT(*) > 0 FROM lokker_apps WHERE packageName = :pkg")
+    boolean isManaged(String pkg);
+
+    @Query("SELECT COUNT(*) > 0 FROM lokker_apps WHERE packageName = :pkg AND hidden = 1")
     boolean isHidden(String pkg);
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    void insert(HiddenApp app);
+    @Query("SELECT * FROM lokker_apps WHERE hidden = 1")
+    List<LokkerApp> getAllHidden();
 
-    @Query("DELETE FROM hidden_apps WHERE packageName = :pkg")
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void insert(LokkerApp app);
+
+    @Query("UPDATE lokker_apps SET hidden = :hidden WHERE packageName = :pkg")
+    void setHidden(String pkg, boolean hidden);
+
+    @Query("DELETE FROM lokker_apps WHERE packageName = :pkg")
     void delete(String pkg);
 
-    @Query("SELECT * FROM hidden_apps")
-    List<HiddenApp> getAllSync();
-
-    @Query("DELETE FROM hidden_apps")
+    @Query("DELETE FROM lokker_apps")
     void deleteAll();
 }
 ```
@@ -1104,7 +1108,7 @@ packages/apps/Lokker/
         │   ├── AppPickerDialog.java        # searchable app picker (add to hidden)
         │   ├── LokkerViewModel.java        # LiveData for hidden apps list + search filter
         │   └── adapter/
-        │       ├── HiddenAppsAdapter.java  # RecyclerView adapter for main list
+        │       ├── LokkerAppsAdapter.java  # RecyclerView adapter for main list
         │       └── AppPickerAdapter.java   # RecyclerView adapter for picker
         ├── domain/
         │   ├── AppRepository.java          # single source of truth
@@ -1113,9 +1117,9 @@ packages/apps/Lokker/
         └── data/
             ├── db/
             │   ├── LokkerDatabase.java     # Room database
-            │   ├── HiddenApp.java          # entity
+            │   ├── LokkerApp.java          # entity
             │   ├── HotkeyMap.java          # entity
-            │   ├── HiddenAppDao.java       # DAO
+            │   ├── LokkerAppDao.java       # DAO
             │   └── Converters.java         # TypeConverters (JSON lists)
             └── LokkerPrefs.java            # EncryptedSharedPreferences
 ```
@@ -1142,14 +1146,15 @@ packages/apps/Lokker/
 | Lokker reinstalled/updated | Lokker visible in launcher, `self_hidden` pref cleared | `PackageMonitor` detects own package → clears `self_hidden`; alias resets to manifest default (enabled) |
 | Device reboots | All hidden apps remain hidden | `packages.xml` persists; `BootReceiver` verifies |
 | Lokker process killed during temp-unhide | **App re-hidden on next start** | `pendingRehide` persisted to EncryptedPrefs; `recoverLeakedApps()` on `Application.onCreate()` |
-| User adds app via GUI picker | App hidden, appears in hidden list | `setApplicationHiddenSetting(true)` + Room insert + LiveData update |
-| User removes app via GUI | App unhidden, disappears from list | `setApplicationHiddenSetting(false)` + Room delete + LiveData update |
-| User adds app to hidden list | App hidden + pinned shortcut auto-created on home screen | `hideApp()` → `setApplicationHiddenSetting(true)` + `createPinnedShortcut()` |
+| User adds app via GUI picker | App added to Lokker (password-protected), shortcut auto-created | `addApplication()` → Room insert + `createPinnedShortcut()` + LiveData update |
+| User removes app via GUI | App removed from Lokker, unhidden, shortcut removed | `removeApplication()` → `setApplicationHiddenSetting(false)` + Room delete + shortcut disable + icon cleanup |
+| User hides a managed app | App disappears from launcher/Settings | `hideApp()` → `setApplicationHiddenSetting(true)` + `setHidden(true)` |
+| User unhides a managed app | App reappears but stays in Lokker (still password-protected) | `unhideApp()` → `setApplicationHiddenSetting(false)` + `setHidden(false)` |
 | User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
 | Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
 | User unhides app | Pinned shortcut auto-removed, icon cache cleaned | `unhideApp()` → `ShortcutManager.disableShortcuts()` + file delete |
-| User taps "Unhide all apps" toggle in settings | All hidden apps restored, list cleared, shortcuts unchanged; snapshot saved; toggle flips to "Hide all apps" | `unhideAll()` — snapshots list to prefs, bulk unhide + `deleteAll()` + clear `pendingRehide`; shortcuts left intact |
-| User taps "Hide all apps" toggle in settings | All previously hidden apps re-hidden from snapshot; toggle flips back to "Unhide all apps" | `rehideAll()` — reads snapshot, re-hides each (skips uninstalled), re-inserts to Room, clears snapshot |
+| User taps "Unhide all apps" toggle in settings | All hidden apps unhidden but stay in Lokker; snapshot saved; toggle flips to "Hide all apps" | `unhideAll()` — snapshots package names, sets `hidden=false` for each, clears `pendingRehide` |
+| User taps "Hide all apps" toggle in settings | All previously unhidden apps re-hidden; toggle flips back to "Unhide all apps" | `rehideAll()` — reads snapshot, sets `hidden=true` for each (skips removed/uninstalled), clears snapshot |
 
 ---
 
@@ -1190,7 +1195,7 @@ packages/apps/Lokker/
 ### Phase 1 — Foundation (~3 days)
 - AOSP module scaffold: `Android.bp` (with `platform_apis: true`), manifest, build integration
 - `privapp-permissions` XML (including `MANAGE_USERS`) + `device.mk` wiring
-- `LokkerDatabase` (Room) + `HiddenApp` entity (no `disabledComponents`) + DAO
+- `LokkerDatabase` (Room) + `LokkerApp` entity (with `hidden` boolean) + DAO
 - `LokkerPrefs` (EncryptedSharedPreferences) with `pendingRehide` persistence
 - `AppRepository` skeleton with `setApplicationHiddenSetting` wiring
 - `LokkerApp.onCreate()` → `recoverLeakedApps()` (re-hide any leaked apps)
@@ -1206,7 +1211,7 @@ packages/apps/Lokker/
 
 ### Phase 3 — GUI (~3 days)
 - `MainActivity` layout: RecyclerView + FAB + toolbar menu
-- `HiddenAppsAdapter` with app icon, name, package, unhide button
+- `LokkerAppsAdapter` with app icon, name, package, hide/unhide toggle
 - `AppPickerDialog`: searchable list of all installed apps
 - `AppPickerAdapter` with checkbox multi-select
 - "Show system apps" toggle in picker
@@ -1309,7 +1314,7 @@ public class ActivityNotResolvedReceiver extends BroadcastReceiver {
         String targetPkg = original.getComponent().getPackageName();
         AppRepository repo = AppRepository.getInstance(context);
 
-        if (repo.isHiddenApp(targetPkg)) {
+        if (repo.isManagedApp(targetPkg)) {
             // Launch auth gate → on success: unhide + launch original intent
             Intent auth = new Intent(context, AuthActivity.class);
             auth.putExtra("target_package", targetPkg);
