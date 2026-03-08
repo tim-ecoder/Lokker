@@ -761,6 +761,8 @@ body {
         <div class="pin-dot" data-i="1"></div>
         <div class="pin-dot" data-i="2"></div>
         <div class="pin-dot" data-i="3"></div>
+        <div class="pin-dot" data-i="4"></div>
+        <div class="pin-dot" data-i="5"></div>
       </div>
       <div class="pin-pad">
         <button class="pin-key" onclick="pinPress('1')">1</button>
@@ -1106,10 +1108,10 @@ function goToMain() {
 
 // ======================== AUTH ========================
 function pinPress(digit) {
-  if (pinValue.length >= 4) return;
+  if (pinValue.length >= 6) return;
   pinValue += digit;
   updatePinDots();
-  if (pinValue.length === 4) {
+  if (pinValue.length === 6) {
     setTimeout(() => {
       pinValue = '';
       updatePinDots();

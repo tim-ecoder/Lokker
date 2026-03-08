@@ -469,7 +469,7 @@ if (packageName.equals(ctx.getPackageName())) {
 
 ## 6. Уровень аутентификации
 
-Двухуровневая аутентификация: **хеш пароля** (PIN/пароль для быстрой разблокировки) + **BiometricPrompt** (отпечаток пальца/лицо).
+Двухуровневая аутентификация: **хеш пароля** (6-значный PIN или пароль для быстрой разблокировки) + **BiometricPrompt** (отпечаток пальца/лицо).
 
 ### Хранение пароля
 
@@ -546,10 +546,12 @@ public void showBiometric(FragmentActivity activity, Runnable onSuccess, Runnabl
 
 1. **AuthActivity запускается** с intent extra `target_package` (если открывается скрытое приложение) или null (открывается Lokker)
 2. **Показывается BiometricPrompt** — сначала отпечаток пальца/лицо
-3. Биометрия не прошла/недоступна → показывается **ввод PIN**
+3. Биометрия не прошла/недоступна → показывается **ввод 6-значного PIN**
 4. Аутентификация успешна + `target_package` задан → `unhideTemporarily()` → `launchHiddenApp()` → `finish()`
 5. Аутентификация успешна + нет цели → `startActivity(MainActivity)` → `finish()`
 6. Аутентификация неудачна 5 раз → **блокировка на 30 секунд**, счётчик в EncryptedPrefs
+
+> **Минимальная длина PIN:** 6 цифр. Экран ввода показывает 6 точек-индикаторов.
 
 > **Безопасность:** AuthActivity должна иметь `excludeFromRecents="true"` и `showWhenLocked="false"`.
 
