@@ -999,7 +999,7 @@ body {
       <div class="divider"></div>
       <div class="section-header">Горячие клавиши приложений</div>
 
-      <div class="settings-item" id="app-hotkey-wa">
+      <div class="settings-item" id="app-hotkey-wa" onclick="openHotkeyDialog('com.whatsapp')">
         <span class="material-symbols-outlined">keyboard</span>
         <div class="settings-info">
           <div class="settings-label">WhatsApp</div>
@@ -1008,7 +1008,7 @@ body {
         <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
       </div>
 
-      <div class="settings-item" id="app-hotkey-signal">
+      <div class="settings-item" id="app-hotkey-signal" onclick="openHotkeyDialog('org.thoughtcrime.securesms')">
         <span class="material-symbols-outlined">keyboard</span>
         <div class="settings-info">
           <div class="settings-label">Signal</div>
@@ -1017,7 +1017,7 @@ body {
         <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
       </div>
 
-      <div class="settings-item" id="app-hotkey-tg">
+      <div class="settings-item" id="app-hotkey-tg" onclick="openHotkeyDialog('org.telegram.messenger')">
         <span class="material-symbols-outlined">keyboard</span>
         <div class="settings-info">
           <div class="settings-label">Telegram</div>
@@ -1052,6 +1052,33 @@ body {
       <div class="confirm-actions">
         <button class="btn-cancel" onclick="closeConfirm()">Отмена</button>
         <button class="btn-confirm" id="confirm-action" onclick="closeConfirm()">Подтвердить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== HOTKEY DIALOG (per-app) ===================== -->
+  <div class="dialog-overlay" id="hotkey-dialog-overlay" onclick="if(event.target===this)closeHotkeyDialog()">
+    <div class="dialog-sheet">
+      <div class="dialog-handle"></div>
+      <div style="padding:0 24px 24px">
+        <div style="font-size:18px;font-weight:500;margin-bottom:4px" id="hotkey-dialog-title">Горячая клавиша</div>
+        <div style="font-size:13px;color:#777;margin-bottom:20px" id="hotkey-dialog-subtitle">Назначить горячую клавишу для приложения</div>
+        <div class="hotkey-recorder" onclick="startAppHotkeyRecording()" style="margin:0 0 16px">
+          <div class="hotkey-sequence" id="app-hotkey-sequence">
+            <span style="color:#666;font-size:14px">Не назначена</span>
+          </div>
+          <div class="recording-indicator" id="app-rec-indicator" style="display:none">
+            <div class="recording-dot"></div>
+            <span>Нажимайте клавиши...</span>
+          </div>
+          <div style="font-size:13px;color:#777;text-align:center">
+            Нажмите для записи последовательности
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;justify-content:flex-end">
+          <button class="btn-cancel" onclick="resetAppHotkey()">Сбросить</button>
+          <button class="btn-confirm" onclick="saveAppHotkey()">Сохранить</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1318,7 +1345,7 @@ function contextAction(action) {
   if (!app) return;
 
   if (action === 'hotkey') {
-    goTo('screen-hotkey');
+    openHotkeyDialog(contextApp);
   } else if (action === 'unhide') {
     unhideApp(contextApp);
   } else if (action === 'remove') {
@@ -1403,6 +1430,49 @@ function startRecording(target) {
       showSnack('Горячая клавиша сохранена');
     }, 3000);
   }
+}
+
+// ======================== APP HOTKEY DIALOG ========================
+let hotkeyDialogApp = null;
+let appRecording = false;
+
+function openHotkeyDialog(pkg) {
+  const app = hiddenApps.find(a => a.pkg === pkg);
+  if (!app) return;
+  hotkeyDialogApp = pkg;
+  document.getElementById('hotkey-dialog-title').textContent = `Горячая клавиша — ${app.name}`;
+  document.getElementById('hotkey-dialog-subtitle').textContent = `Назначить горячую клавишу для ${app.name}`;
+  document.getElementById('app-hotkey-sequence').innerHTML = '<span style="color:#666;font-size:14px">Не назначена</span>';
+  document.getElementById('app-rec-indicator').style.display = 'none';
+  document.getElementById('hotkey-dialog-overlay').classList.add('active');
+}
+
+function closeHotkeyDialog() {
+  document.getElementById('hotkey-dialog-overlay').classList.remove('active');
+  hotkeyDialogApp = null;
+  appRecording = false;
+}
+
+function startAppHotkeyRecording() {
+  if (appRecording) return;
+  appRecording = true;
+  document.getElementById('app-rec-indicator').style.display = 'flex';
+  setTimeout(() => {
+    appRecording = false;
+    document.getElementById('app-rec-indicator').style.display = 'none';
+    document.getElementById('app-hotkey-sequence').innerHTML =
+      '<span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↑</span>';
+  }, 2500);
+}
+
+function resetAppHotkey() {
+  document.getElementById('app-hotkey-sequence').innerHTML = '<span style="color:#666;font-size:14px">Не назначена</span>';
+}
+
+function saveAppHotkey() {
+  const app = hiddenApps.find(a => a.pkg === hotkeyDialogApp);
+  closeHotkeyDialog();
+  showSnack(`Горячая клавиша для ${app?.name} сохранена`);
 }
 
 // ======================== CONFIRM DIALOG ========================
