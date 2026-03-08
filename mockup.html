@@ -476,22 +476,6 @@ body {
   padding: 32px 24px;
   gap: 24px;
 }
-.setup-step {
-  font-size: 14px;
-  color: #BB86FC;
-  font-weight: 500;
-}
-.setup-title {
-  font-size: 28px;
-  font-weight: 500;
-  color: #E0E0E0;
-  line-height: 1.3;
-}
-.setup-desc {
-  font-size: 15px;
-  color: #888;
-  line-height: 1.5;
-}
 .text-input-group {
   display: flex;
   flex-direction: column;
@@ -736,6 +720,28 @@ body {
   font-size: 13px;
 }
 .about-section .version { margin-top: 4px; }
+
+/* PIN shake animation */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-12px); }
+  40% { transform: translateX(12px); }
+  60% { transform: translateX(-8px); }
+  80% { transform: translateX(8px); }
+}
+.pin-dots.shake { animation: shake 0.4s ease; }
+.pin-dot.error { border-color: #CF6679; background: #CF6679; }
+
+/* Auth lockout */
+.auth-lockout {
+  font-size: 14px;
+  color: #CF6679;
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* Input error state */
+.text-input.error { border-color: #CF6679; }
 </style>
 </head>
 <body>
@@ -778,30 +784,11 @@ body {
         <button class="pin-key" onclick="pinPress('0')">0</button>
         <button class="pin-key" onclick="pinDelete()"><span class="material-symbols-outlined">backspace</span></button>
       </div>
+      <div class="auth-lockout" id="auth-lockout" style="display:none"></div>
       <button class="biometric-btn" onclick="biometricAuth()">
         <span class="material-symbols-outlined">fingerprint</span>
         Биометрия
       </button>
-    </div>
-  </div>
-
-  <!-- ===================== SCREEN: SETUP ===================== -->
-  <div class="screen" id="screen-setup">
-    <div class="setup-container">
-      <div class="setup-step">Шаг 1 из 2</div>
-      <div class="setup-title">Создайте пароль для Lokker</div>
-      <div class="setup-desc">Этот пароль будет использоваться для защиты скрытых приложений и доступа к Lokker.</div>
-      <div class="text-input-group">
-        <label>Пароль</label>
-        <input type="password" class="text-input" placeholder="Введите PIN или пароль" id="setup-pw">
-      </div>
-      <div class="text-input-group">
-        <label>Подтвердите пароль</label>
-        <input type="password" class="text-input" placeholder="Повторите пароль" id="setup-pw2">
-      </div>
-      <div class="setup-bottom">
-        <button class="primary-btn" onclick="finishSetup()">Продолжить</button>
-      </div>
     </div>
   </div>
 
@@ -890,11 +877,11 @@ body {
         </div>
       </div>
 
-      <div class="settings-item" onclick="goTo('screen-change-pw')">
+      <div class="settings-item" onclick="openPasswordScreen()">
         <span class="material-symbols-outlined">lock</span>
         <div class="settings-info">
-          <div class="settings-label">Сменить пароль</div>
-          <div class="settings-desc">Изменить PIN или пароль</div>
+          <div class="settings-label" id="pw-settings-label">Установить пароль</div>
+          <div class="settings-desc" id="pw-settings-desc">Не установлен</div>
         </div>
         <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
       </div>
@@ -934,6 +921,7 @@ body {
       </div>
 
       <div class="divider"></div>
+      <div class="section-header">О приложении</div>
 
       <div class="about-section">
         <div><b>Lokker</b></div>
@@ -949,23 +937,23 @@ body {
       <button class="back-btn" onclick="goTo('screen-settings')">
         <span class="material-symbols-outlined">arrow_back</span>
       </button>
-      <span class="title">Сменить пароль</span>
+      <span class="title" id="change-pw-title">Установить пароль</span>
     </div>
     <div class="setup-container">
-      <div class="text-input-group">
+      <div class="text-input-group" id="current-pw-group" style="display:none">
         <label>Текущий пароль</label>
-        <input type="password" class="text-input" placeholder="Введите текущий пароль">
+        <input type="password" class="text-input" placeholder="Введите текущий пароль" id="current-pw">
       </div>
       <div class="text-input-group">
-        <label>Новый пароль</label>
-        <input type="password" class="text-input" placeholder="Введите новый пароль">
+        <label id="new-pw-label">Новый пароль</label>
+        <input type="password" class="text-input" placeholder="Введите PIN или пароль" id="new-pw">
       </div>
       <div class="text-input-group">
-        <label>Подтвердите новый пароль</label>
-        <input type="password" class="text-input" placeholder="Повторите новый пароль">
+        <label id="confirm-pw-label">Подтвердите пароль</label>
+        <input type="password" class="text-input" placeholder="Повторите пароль" id="confirm-pw">
       </div>
       <div class="setup-bottom">
-        <button class="primary-btn" onclick="goTo('screen-settings'); showSnack('Пароль успешно изменён')">Сохранить</button>
+        <button class="primary-btn" onclick="savePassword()">Сохранить</button>
       </div>
     </div>
   </div>
@@ -999,31 +987,8 @@ body {
       <div class="divider"></div>
       <div class="section-header">Горячие клавиши приложений</div>
 
-      <div class="settings-item" id="app-hotkey-wa" onclick="openHotkeyDialog('com.whatsapp')">
-        <span class="material-symbols-outlined">keyboard</span>
-        <div class="settings-info">
-          <div class="settings-label">WhatsApp</div>
-          <div class="settings-desc">Не назначена</div>
-        </div>
-        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
-      </div>
-
-      <div class="settings-item" id="app-hotkey-signal" onclick="openHotkeyDialog('org.thoughtcrime.securesms')">
-        <span class="material-symbols-outlined">keyboard</span>
-        <div class="settings-info">
-          <div class="settings-label">Signal</div>
-          <div class="settings-desc">Vol ↓ Vol ↓ Vol ↑</div>
-        </div>
-        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
-      </div>
-
-      <div class="settings-item" id="app-hotkey-tg" onclick="openHotkeyDialog('org.telegram.messenger')">
-        <span class="material-symbols-outlined">keyboard</span>
-        <div class="settings-info">
-          <div class="settings-label">Telegram</div>
-          <div class="settings-desc">Не назначена</div>
-        </div>
-        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      <div id="hotkey-apps-container">
+        <!-- #12: заполняется динамически через renderHotkeyAppList() -->
       </div>
     </div>
   </div>
@@ -1034,9 +999,9 @@ body {
       <span class="material-symbols-outlined">keyboard</span>
       Назначить горячую клавишу
     </div>
-    <div class="context-menu-item" onclick="contextAction('unhide')">
-      <span class="material-symbols-outlined">visibility</span>
-      Раскрыть
+    <div class="context-menu-item" onclick="contextAction('launch')">
+      <span class="material-symbols-outlined">play_arrow</span>
+      Запустить
     </div>
     <div class="context-menu-item" onclick="contextAction('remove')">
       <span class="material-symbols-outlined">delete</span>
@@ -1116,12 +1081,24 @@ let pickerSelected = new Set();
 let showSystemApps = false;
 let pinValue = '';
 let contextApp = null;
+let passwordSet = false;       // #1: пароль не установлен по умолчанию
+let failCount = 0;             // #3: счётчик неудачных попыток
+let lockedUntil = 0;           // #3: временная метка блокировки
+let lockoutTimer = null;
+let hotkeyConfigured = true;   // #7: горячая клавиша настроена (для демо)
+let appHotkeys = {};           // #11/#12: горячие клавиши приложений
+let unhideAllActive = false;   // #14: снимок "раскрыть все" активен
+const CORRECT_PIN = '123456';  // демо-PIN
 
 // ======================== NAVIGATION ========================
 function goTo(screenId) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(screenId).classList.add('active');
   closeContextMenu();
+  // #8: обновляем видимость unhide-all при входе в настройки
+  if (screenId === 'screen-settings') updateSettingsState();
+  // #12: обновляем список горячих клавиш при входе
+  if (screenId === 'screen-hotkey') renderHotkeyAppList();
 }
 
 function goToMain() {
@@ -1135,25 +1112,67 @@ function goToMain() {
 
 // ======================== AUTH ========================
 function pinPress(digit) {
+  // #3: проверка блокировки
+  if (Date.now() < lockedUntil) return;
   if (pinValue.length >= 6) return;
   pinValue += digit;
   updatePinDots();
   if (pinValue.length === 6) {
     setTimeout(() => {
-      pinValue = '';
-      updatePinDots();
-      // First time → setup; otherwise → main
-      if (hiddenApps.length > 0) {
-        goTo('screen-main');
-        renderHiddenApps();
+      if (pinValue === CORRECT_PIN) {
+        // Успешная аутентификация
+        failCount = 0;
+        pinValue = '';
+        updatePinDots();
+        goToMain();
       } else {
-        goTo('screen-main-empty');
+        // #4: Неверный PIN — тряска + красные точки
+        failCount++;
+        const dots = document.getElementById('pin-dots');
+        dots.querySelectorAll('.pin-dot').forEach(d => d.classList.add('error'));
+        dots.classList.add('shake');
+        setTimeout(() => {
+          dots.classList.remove('shake');
+          dots.querySelectorAll('.pin-dot').forEach(d => d.classList.remove('error'));
+          pinValue = '';
+          updatePinDots();
+        }, 500);
+
+        if (failCount >= 5) {
+          // #3: Блокировка на 30 секунд
+          lockedUntil = Date.now() + 30000;
+          startLockoutTimer();
+          showSnack('Слишком много попыток. Блокировка 30 сек.');
+        } else {
+          showSnack(`Неверный PIN (попытка ${failCount}/5)`);
+        }
       }
     }, 300);
   }
 }
 
+function startLockoutTimer() {
+  const el = document.getElementById('auth-lockout');
+  el.style.display = 'block';
+  // Блокируем клавиатуру визуально
+  document.querySelectorAll('.pin-key').forEach(k => k.style.opacity = '0.3');
+
+  if (lockoutTimer) clearInterval(lockoutTimer);
+  lockoutTimer = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+    if (remaining <= 0) {
+      clearInterval(lockoutTimer);
+      el.style.display = 'none';
+      failCount = 0;
+      document.querySelectorAll('.pin-key').forEach(k => k.style.opacity = '1');
+    } else {
+      el.textContent = `Повторите через ${remaining} сек.`;
+    }
+  }, 200);
+}
+
 function pinDelete() {
+  if (Date.now() < lockedUntil) return;
   pinValue = pinValue.slice(0, -1);
   updatePinDots();
 }
@@ -1166,19 +1185,8 @@ function updatePinDots() {
 
 function biometricAuth() {
   showSnack('Биометрия подтверждена');
-  setTimeout(() => {
-    if (hiddenApps.length > 0) {
-      goTo('screen-main');
-      renderHiddenApps();
-    } else {
-      goTo('screen-main-empty');
-    }
-  }, 600);
-}
-
-function finishSetup() {
-  goTo('screen-main-empty');
-  showSnack('Пароль установлен');
+  failCount = 0;
+  setTimeout(() => goToMain(), 600);
 }
 
 // ======================== HIDDEN APPS LIST ========================
@@ -1209,19 +1217,6 @@ function filterMainList() { renderHiddenApps(); }
 function launchApp(pkg) {
   const app = hiddenApps.find(a => a.pkg === pkg);
   showSnack(`Запуск ${app?.name}... (аутентификация → раскрытие → запуск)`);
-}
-
-function unhideApp(pkg) {
-  showConfirm(
-    'Раскрыть приложение?',
-    'Приложение снова появится в лаунчере, но останется под защитой Lokker.',
-    () => {
-      const app = hiddenApps.find(a => a.pkg === pkg);
-      hiddenApps = hiddenApps.filter(a => a.pkg !== pkg);
-      goToMain();
-      showSnack(`${app?.name} раскрыто`);
-    }
-  );
 }
 
 // ======================== APP PICKER ========================
@@ -1346,14 +1341,16 @@ function contextAction(action) {
 
   if (action === 'hotkey') {
     openHotkeyDialog(contextApp);
-  } else if (action === 'unhide') {
-    unhideApp(contextApp);
+  } else if (action === 'launch') {
+    // #9: Запустить = то же, что нажатие на строку
+    launchApp(contextApp);
   } else if (action === 'remove') {
     showConfirm(
       'Удалить из Lokker?',
       `${app.name} будет раскрыто и удалено из управления Lokker.`,
       () => {
         hiddenApps = hiddenApps.filter(a => a.pkg !== contextApp);
+        delete appHotkeys[contextApp];
         goToMain();
         showSnack(`${app.name} удалено из Lokker`);
       }
@@ -1362,11 +1359,101 @@ function contextAction(action) {
 }
 
 // ======================== SETTINGS ========================
+function updateSettingsState() {
+  // #1: обновляем пункт пароля
+  const pwLabel = document.getElementById('pw-settings-label');
+  const pwDesc = document.getElementById('pw-settings-desc');
+  if (passwordSet) {
+    pwLabel.textContent = 'Сменить пароль';
+    pwDesc.textContent = 'Изменить PIN или пароль';
+  } else {
+    pwLabel.textContent = 'Установить пароль';
+    pwDesc.textContent = 'Не установлен';
+  }
+
+  // #8: скрываем "раскрыть все" если нет скрытых и нет снимка
+  const unhideBtn = document.getElementById('unhide-all-btn');
+  if (hiddenApps.length === 0 && !unhideAllActive) {
+    unhideBtn.style.display = 'none';
+  } else {
+    unhideBtn.style.display = '';
+  }
+}
+
+function openPasswordScreen() {
+  const title = document.getElementById('change-pw-title');
+  const currentGroup = document.getElementById('current-pw-group');
+  const newLabel = document.getElementById('new-pw-label');
+  const confirmLabel = document.getElementById('confirm-pw-label');
+
+  // Сбрасываем поля
+  document.getElementById('new-pw').value = '';
+  document.getElementById('confirm-pw').value = '';
+  document.querySelectorAll('#screen-change-pw .text-input').forEach(i => i.classList.remove('error'));
+
+  if (passwordSet) {
+    title.textContent = 'Сменить пароль';
+    currentGroup.style.display = '';
+    document.getElementById('current-pw').value = '';
+    newLabel.textContent = 'Новый пароль';
+    confirmLabel.textContent = 'Подтвердите новый пароль';
+  } else {
+    title.textContent = 'Установить пароль';
+    currentGroup.style.display = 'none';
+    newLabel.textContent = 'Новый пароль';
+    confirmLabel.textContent = 'Подтвердите пароль';
+  }
+  goTo('screen-change-pw');
+}
+
+function savePassword() {
+  const currentPw = document.getElementById('current-pw');
+  const newPw = document.getElementById('new-pw');
+  const confirmPw = document.getElementById('confirm-pw');
+
+  // Сброс ошибок
+  [currentPw, newPw, confirmPw].forEach(i => i.classList.remove('error'));
+
+  // #5: Валидация текущего пароля (режим смены)
+  if (passwordSet) {
+    if (currentPw.value !== CORRECT_PIN) {
+      currentPw.classList.add('error');
+      showSnack('Неверный текущий пароль');
+      return;
+    }
+  }
+
+  // #5/#6: Валидация минимальной длины
+  if (newPw.value.length < 6) {
+    newPw.classList.add('error');
+    showSnack('Пароль должен содержать минимум 6 символов');
+    return;
+  }
+
+  // #5/#6: Совпадение паролей
+  if (newPw.value !== confirmPw.value) {
+    confirmPw.classList.add('error');
+    showSnack('Пароли не совпадают');
+    return;
+  }
+
+  const wasSet = passwordSet;
+  passwordSet = true;
+  goTo('screen-settings');
+  updateSettingsState();
+  showSnack(wasSet ? 'Пароль успешно изменён' : 'Пароль установлен');
+}
+
 function toggleSelfHide() {
   const toggle = document.getElementById('self-hide-toggle');
   const isOn = toggle.classList.contains('on');
 
   if (!isOn) {
+    // #7: проверка горячей клавиши перед самоскрытием
+    if (!hotkeyConfigured) {
+      showSnack('Сначала настройте горячую клавишу');
+      return;
+    }
     showConfirm(
       'Скрыть Lokker?',
       'Lokker будет скрыт из лаунчера. Вы сможете открыть его только горячей клавишей (Громкость↑ Громкость↑ Громкость↓). Продолжить?',
@@ -1390,7 +1477,7 @@ function unhideAllApps() {
   const label = document.getElementById('unhide-all-label');
   const desc = document.getElementById('unhide-all-desc');
 
-  if (label.textContent === 'Раскрыть все приложения') {
+  if (!unhideAllActive) {
     if (hiddenApps.length === 0) {
       showSnack('Нет скрытых приложений');
       return;
@@ -1399,6 +1486,7 @@ function unhideAllApps() {
       'Раскрыть все?',
       `Это раскроет все ${hiddenApps.length} скрытых приложений. Закреплённые ярлыки сохранятся.`,
       () => {
+        unhideAllActive = true;
         label.textContent = 'Скрыть все приложения';
         desc.textContent = 'Повторно скрыть ранее раскрытые приложения';
         showSnack('Все приложения раскрыты');
@@ -1407,8 +1495,9 @@ function unhideAllApps() {
   } else {
     showConfirm(
       'Скрыть все?',
-      `Повторно скрыть все ранее скрытых приложений?`,
+      'Повторно скрыть все ранее раскрытые приложения?',
       () => {
+        unhideAllActive = false;
         label.textContent = 'Раскрыть все приложения';
         desc.textContent = 'Временно показать все скрытые приложения';
         showSnack('Все приложения скрыты');
@@ -1427,6 +1516,7 @@ function startRecording(target) {
     setTimeout(() => {
       recording = false;
       indicator.style.display = 'none';
+      hotkeyConfigured = true;
       showSnack('Горячая клавиша сохранена');
     }, 3000);
   }
@@ -1442,7 +1532,14 @@ function openHotkeyDialog(pkg) {
   hotkeyDialogApp = pkg;
   document.getElementById('hotkey-dialog-title').textContent = `Горячая клавиша — ${app.name}`;
   document.getElementById('hotkey-dialog-subtitle').textContent = `Назначить горячую клавишу для ${app.name}`;
-  document.getElementById('app-hotkey-sequence').innerHTML = '<span style="color:#666;font-size:14px">Не назначена</span>';
+
+  // #11: показываем текущую горячую клавишу, если назначена
+  const currentHotkey = appHotkeys[pkg];
+  if (currentHotkey) {
+    document.getElementById('app-hotkey-sequence').innerHTML = currentHotkey;
+  } else {
+    document.getElementById('app-hotkey-sequence').innerHTML = '<span style="color:#666;font-size:14px">Не назначена</span>';
+  }
   document.getElementById('app-rec-indicator').style.display = 'none';
   document.getElementById('hotkey-dialog-overlay').classList.add('active');
 }
@@ -1460,19 +1557,56 @@ function startAppHotkeyRecording() {
   setTimeout(() => {
     appRecording = false;
     document.getElementById('app-rec-indicator').style.display = 'none';
-    document.getElementById('app-hotkey-sequence').innerHTML =
-      '<span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↑</span>';
+    const seq = '<span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↑</span>';
+    document.getElementById('app-hotkey-sequence').innerHTML = seq;
   }, 2500);
 }
 
 function resetAppHotkey() {
   document.getElementById('app-hotkey-sequence').innerHTML = '<span style="color:#666;font-size:14px">Не назначена</span>';
+  if (hotkeyDialogApp) delete appHotkeys[hotkeyDialogApp];
 }
 
 function saveAppHotkey() {
   const app = hiddenApps.find(a => a.pkg === hotkeyDialogApp);
+  // #11: сохраняем горячую клавишу
+  const seqEl = document.getElementById('app-hotkey-sequence');
+  if (seqEl.querySelector('.key-badge')) {
+    appHotkeys[hotkeyDialogApp] = seqEl.innerHTML;
+  } else {
+    delete appHotkeys[hotkeyDialogApp];
+  }
   closeHotkeyDialog();
   showSnack(`Горячая клавиша для ${app?.name} сохранена`);
+}
+
+// #12: динамический список приложений на экране горячих клавиш
+function renderHotkeyAppList() {
+  const container = document.getElementById('hotkey-apps-container');
+  if (!container) return;
+
+  if (hiddenApps.length === 0) {
+    // #15: пустое состояние
+    container.innerHTML = '<div style="padding:16px;color:#666;text-align:center;font-size:14px">Нет скрытых приложений</div>';
+    return;
+  }
+
+  container.innerHTML = hiddenApps.map(app => {
+    const hotkey = appHotkeys[app.pkg];
+    const desc = hotkey
+      ? hotkey.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+      : 'Не назначена';
+    return `
+      <div class="settings-item" onclick="openHotkeyDialog('${app.pkg}')">
+        <span class="material-symbols-outlined">keyboard</span>
+        <div class="settings-info">
+          <div class="settings-label">${app.name}</div>
+          <div class="settings-desc">${desc}</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // ======================== CONFIRM DIALOG ========================
@@ -1511,9 +1645,11 @@ hiddenApps = [
   allApps[1], // Signal
   allApps[2], // Telegram
 ];
+// Demo: Signal has a hotkey assigned
+appHotkeys['org.thoughtcrime.securesms'] = '<span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↓</span><span class="key-badge active">Vol ↑</span>';
 
-// Start at auth screen
-goTo('screen-auth');
+// #1: Start at main list (no auth required until password is set)
+goToMain();
 </script>
 
 </body>
