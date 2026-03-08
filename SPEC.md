@@ -526,8 +526,10 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 - **Self-hide toggle** — hide/show Lokker in the launcher. When enabled, Lokker icon disappears; only accessible via hotkey. Shows confirmation dialog: "Lokker will be hidden from the launcher. You can only open it with the hotkey (Vol↑ Vol↑ Vol↓). Continue?"
 - **Change password** — re-enter current, set new
 - **Hotkey configuration** — opens `HotkeySetupActivity` (must be configured before self-hide can be enabled)
-- **Unhide all apps** — danger button that unhides every hidden app at once. Shows confirmation dialog: "This will unhide all N hidden apps and remove their pinned shortcuts. This cannot be undone. Continue?" Calls `unhideAll()`. Only visible when there are hidden apps.
-- **Re-hide all apps** — appears only after `unhideAll()` was used and the previous hidden list is still cached. Shows confirmation dialog: "Re-hide all N previously hidden apps?" Calls `rehideAll()`. Disappears once used or if the user manually modifies the hidden list.
+- **Hide all / Unhide all toggle** — single preference that toggles between two states:
+  - When apps are hidden: shows **"Unhide all apps"**. Confirmation: "This will unhide all N hidden apps and remove their pinned shortcuts. Continue?" Calls `unhideAll()`, which snapshots the list then unhides.
+  - When snapshot exists (apps were just unhidden): shows **"Hide all apps"**. Confirmation: "Re-hide all N previously hidden apps?" Calls `rehideAll()`, which re-hides from the snapshot.
+  - Hidden when no apps are hidden and no snapshot exists.
 - **Biometric toggle** — enable/disable biometric auth
 - **About** — version info
 
@@ -1130,8 +1132,8 @@ packages/apps/Lokker/
 | User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
 | Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
 | User unhides app permanently | Pinned shortcut disabled, icon cache cleaned | `ShortcutManager.disableShortcuts()` + file delete |
-| User taps "Unhide all apps" in settings | All hidden apps restored, list cleared, shortcuts disabled; snapshot saved | `unhideAll()` — snapshots list to prefs, bulk unhide + `deleteAll()` + clear `pendingRehide` |
-| User taps "Re-hide all apps" in settings | All previously hidden apps re-hidden from snapshot | `rehideAll()` — reads snapshot, re-hides each (skips uninstalled), re-inserts to Room, clears snapshot |
+| User taps "Unhide all apps" toggle in settings | All hidden apps restored, list cleared, shortcuts disabled; snapshot saved; toggle flips to "Hide all apps" | `unhideAll()` — snapshots list to prefs, bulk unhide + `deleteAll()` + clear `pendingRehide` |
+| User taps "Hide all apps" toggle in settings | All previously hidden apps re-hidden from snapshot; toggle flips back to "Unhide all apps" | `rehideAll()` — reads snapshot, re-hides each (skips uninstalled), re-inserts to Room, clears snapshot |
 
 ---
 
