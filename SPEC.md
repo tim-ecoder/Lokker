@@ -522,7 +522,7 @@ The main UI is `MainActivity`, which shows two tabs/sections:
 - RecyclerView showing all currently hidden apps
 - Each row shows: **app icon** | **app name** | **package name** (dimmed) | **unhide button**
 - Tapping a row launches the app (auth → unhide → launch → rehide on switch)
-- Long-press on a row opens options: Unhide, Set Hotkey, Create Shortcut
+- Long-press on a row opens options: Unhide, Set Hotkey
 - **Floating Action Button (FAB)** → opens the App Picker to add apps
 - Empty state: centered message "No hidden apps. Tap + to hide an app." (search bar hidden when list is empty)
 
@@ -601,11 +601,11 @@ Tap row = launch app (auth → unhide → launch → rehide)
 
 ### 7.5 Pinned Shortcuts for Hidden Apps
 
-Lokker can create **pinned home-screen shortcuts** for hidden apps. Each shortcut routes through `AuthActivity`, so tapping it triggers auth → unhide → launch → rehide-on-switch. This also enables key remappers (KeyMapper, etc.) to trigger hidden apps without needing a framework patch — the remapper simply targets the pinned shortcut.
+Lokker **automatically creates a pinned home-screen shortcut** when an app is added to the hidden list, and **automatically removes it** when the app is unhidden. Each shortcut routes through `AuthActivity`, so tapping it triggers auth → unhide → launch → rehide-on-switch. This also enables key remappers (KeyMapper, etc.) to trigger hidden apps without needing a framework patch — the remapper simply targets the pinned shortcut.
 
-#### Creating a shortcut
+#### Automatic shortcut creation
 
-Offered via the long-press menu on any hidden app row in `MainActivity`.
+Called automatically by `hideApp()` after hiding the app.
 
 ```java
 // AppRepository.java
@@ -688,12 +688,15 @@ public void hideApp(String packageName) {
 
     HiddenApp record = new HiddenApp(packageName, label, null, System.currentTimeMillis());
     db.hiddenAppDao().insert(record);
+
+    // Auto-create pinned shortcut
+    createPinnedShortcut(packageName);
 }
 ```
 
-#### Removing stale shortcuts
+#### Automatic shortcut removal
 
-When a user permanently unhides an app, remove any corresponding pinned shortcut:
+When an app is unhidden, remove its pinned shortcut and cached icon:
 
 ```java
 // AppRepository.java
@@ -819,15 +822,13 @@ The user configures their key remapper to launch the pinned shortcut (or the exp
 
 #### UI in hidden apps list
 
-Add "Create shortcut" to the long-press context menu:
+Long-press context menu (shortcuts are created/removed automatically, launch is via tap):
 
 ```
 ┌──────────────────────────────────┐
 │  WhatsApp                        │
 │  com.whatsapp                    │
 ├──────────────────────────────────┤
-│  ▶ Launch                        │
-│  🔗 Create shortcut              │
 │  ⌨ Set hotkey                    │
 │  ⊘ Unhide                        │
 └──────────────────────────────────┘
@@ -1143,10 +1144,10 @@ packages/apps/Lokker/
 | Lokker process killed during temp-unhide | **App re-hidden on next start** | `pendingRehide` persisted to EncryptedPrefs; `recoverLeakedApps()` on `Application.onCreate()` |
 | User adds app via GUI picker | App hidden, appears in hidden list | `setApplicationHiddenSetting(true)` + Room insert + LiveData update |
 | User removes app via GUI | App unhidden, disappears from list | `setApplicationHiddenSetting(false)` + Room delete + LiveData update |
-| User creates pinned shortcut | Shortcut appears on home screen with app's icon/label | `ShortcutManager.requestPinShortcut()` → cached icon + `AuthActivity` intent |
+| User adds app to hidden list | App hidden + pinned shortcut auto-created on home screen | `hideApp()` → `setApplicationHiddenSetting(true)` + `createPinnedShortcut()` |
 | User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
 | Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
-| User unhides app permanently | Pinned shortcut disabled, icon cache cleaned | `ShortcutManager.disableShortcuts()` + file delete |
+| User unhides app | Pinned shortcut auto-removed, icon cache cleaned | `unhideApp()` → `ShortcutManager.disableShortcuts()` + file delete |
 | User taps "Unhide all apps" toggle in settings | All hidden apps restored, list cleared, shortcuts unchanged; snapshot saved; toggle flips to "Hide all apps" | `unhideAll()` — snapshots list to prefs, bulk unhide + `deleteAll()` + clear `pendingRehide`; shortcuts left intact |
 | User taps "Hide all apps" toggle in settings | All previously hidden apps re-hidden from snapshot; toggle flips back to "Unhide all apps" | `rehideAll()` — reads snapshot, re-hides each (skips uninstalled), re-inserts to Room, clears snapshot |
 
