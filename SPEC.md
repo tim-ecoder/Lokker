@@ -12,16 +12,16 @@
 ### Core Features
 
 - Hide any installed app from the launcher
-- Hide Lokker itself from the launcher
+- **Hide Lokker itself from the launcher** (preference toggle — when enabled, Lokker is only accessible via hotkey)
 - Password/biometric gate on Lokker open
 - Password gate on hidden app open
 - **Rehide app automatically when user switches away** (Home, Back, Recents, or opening another app)
 - Remove hidden apps from Recents screen
 - Suppress notifications from hidden apps
 - **GUI for adding/removing apps** to the hidden list (searchable app picker)
-- Secret hotkey to reveal Lokker
+- Secret hotkey to reveal Lokker (the **only** entry point when Lokker is self-hidden)
 - Secret hotkey to open a hidden app directly
-- Dialer secret code entry (`*#5655#`)
+- Dialer secret code entry (`*#5655#`) — optional fallback
 
 ### Non-Goals (Out of Scope)
 
@@ -337,6 +337,8 @@ If Lokker is killed while an app is temporarily unhidden, `LokkerApp.onCreate()`
 
 ## 5. Self-Hiding & Secret Entry
 
+Lokker can hide itself from the launcher via a **preference toggle** in Settings. When self-hidden, the app icon disappears completely — the **only** way to open Lokker is through the configured hotkey (default: Vol↑ Vol↑ Vol↓). The dialer secret code (`*#5655#`) is available as an optional fallback but the hotkey is the primary and recommended entry point.
+
 ### Manifest aliases
 
 Two Activity entries: the real `MainActivity` (never disabled, reachable via explicit intent) and a `LokkerLauncher` alias (disabled when self-hidden).
@@ -368,8 +370,18 @@ Two Activity entries: the real `MainActivity` (never disabled, reachable via exp
 
 ### setSelfHidden()
 
+Self-hide is controlled by a preference toggle. Before enabling, the system **must** verify that a Lokker hotkey is configured — otherwise the user would lock themselves out.
+
 ```java
 public void setSelfHidden(boolean hidden) {
+    if (hidden) {
+        // Guard: refuse to self-hide if no hotkey is configured
+        HotkeyConfig config = repo.getHotkeyConfig();
+        if (config.getLokkerHotkey() == null || config.getLokkerHotkey().isEmpty()) {
+            throw new IllegalStateException("Cannot self-hide without a configured hotkey");
+        }
+    }
+
     ComponentName alias = new ComponentName(ctx, "com.lokker.app.LokkerLauncher");
     int state = hidden
         ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
@@ -511,9 +523,9 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 
 ### 7.3 Settings Section (accessible via toolbar menu or gear icon)
 
-- **Self-hide toggle** — hide/show Lokker in the launcher
+- **Self-hide toggle** — hide/show Lokker in the launcher. When enabled, Lokker icon disappears; only accessible via hotkey. Shows confirmation dialog: "Lokker will be hidden from the launcher. You can only open it with the hotkey (Vol↑ Vol↑ Vol↓). Continue?"
 - **Change password** — re-enter current, set new
-- **Hotkey configuration** — opens `HotkeySetupActivity`
+- **Hotkey configuration** — opens `HotkeySetupActivity` (must be configured before self-hide can be enabled)
 - **Biometric toggle** — enable/disable biometric auth
 - **About** — version info
 
@@ -1002,8 +1014,9 @@ packages/apps/Lokker/
 | User opens launcher | Hidden app icon not visible | `setApplicationHiddenSetting(pkg, true)` |
 | User opens Settings → Apps | **Hidden app NOT listed** | `setApplicationHiddenSetting` — complete system-level hiding |
 | User runs `pm list packages` | **Hidden app NOT listed** | Same (hidden from all PM queries) |
-| User opens Lokker (icon hidden) | Lokker not visible in launcher | `setComponentEnabledSetting` on self alias |
-| User presses hotkey | Auth prompt → Lokker UI opens | `onKeyEvent` intercept → `BiometricPrompt` |
+| User enables self-hide in preferences | Lokker icon disappears from launcher | `setComponentEnabledSetting` disables `LokkerLauncher` alias |
+| User tries to find Lokker (self-hidden) | Lokker not visible anywhere — launcher, Recents, Settings app list | Alias disabled + `excludeFromRecents` |
+| User presses hotkey (only way in) | Auth prompt → Lokker UI opens | `onKeyEvent` intercept → `AuthActivity` → `MainActivity` |
 | User launches hidden app via Lokker | Auth → app launches normally | `setApplicationHiddenSetting(false)` → `startActivity` → rehide on switch |
 | **User switches away from hidden app** | **App re-hides immediately, removed from Recents** | **`TaskStackListener` + `TYPE_WINDOW_STATE_CHANGED` → `setApplicationHiddenSetting(true)` + `removeTask()`** |
 | User presses Home in hidden app | App re-hides, removed from Recents | Same as above |
