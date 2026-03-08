@@ -562,6 +562,158 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 └──────────────────────────────────┘
 ```
 
+### 7.5 Pinned Shortcuts for Hidden Apps
+
+Lokker can create **pinned home-screen shortcuts** for hidden apps. Each shortcut routes through `AuthActivity`, so tapping it triggers auth → unhide → launch → rehide-on-switch. This also enables key remappers (KeyMapper, etc.) to trigger hidden apps without needing a framework patch — the remapper simply targets the pinned shortcut.
+
+#### Creating a shortcut
+
+Offered via the long-press menu on any hidden app row in `MainActivity`.
+
+```java
+// AppRepository.java
+
+public void createPinnedShortcut(String packageName) {
+    HiddenApp record = db.hiddenAppDao().get(packageName);
+    if (record == null) return;
+
+    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
+    if (!sm.isRequestPinShortcutSupported()) return;
+
+    // Build intent that routes through AuthActivity
+    Intent target = new Intent(ctx, AuthActivity.class);
+    target.setAction("com.lokker.app.LAUNCH_HIDDEN");
+    target.putExtra("target_package", packageName);
+
+    // Use cached icon from before hiding
+    Icon icon = loadCachedIcon(packageName);  // see below
+    if (icon == null) {
+        icon = Icon.createWithResource(ctx, R.drawable.ic_launcher);
+    }
+
+    ShortcutInfo shortcut = new ShortcutInfo.Builder(ctx, "lokker_" + packageName)
+        .setShortLabel(record.appLabel)
+        .setIcon(icon)
+        .setIntent(target)
+        .build();
+
+    sm.requestPinShortcut(shortcut, null);
+}
+```
+
+#### Caching app icons before hiding
+
+App icons must be cached **before** `setApplicationHiddenSetting(true)` because hidden apps are invisible to `PackageManager` queries. Icons are stored as PNGs in Lokker's internal storage.
+
+```java
+// AppRepository.java
+
+private void cacheAppIcon(String packageName) {
+    try {
+        Drawable icon = pm.getApplicationIcon(packageName);
+        Bitmap bmp = drawableToBitmap(icon);
+        File file = new File(ctx.getFilesDir(), "icons/" + packageName + ".png");
+        file.getParentFile().mkdirs();
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
+        }
+    } catch (PackageManager.NameNotFoundException ignored) {}
+}
+
+private Icon loadCachedIcon(String packageName) {
+    File file = new File(ctx.getFilesDir(), "icons/" + packageName + ".png");
+    if (!file.exists()) return null;
+    return Icon.createWithBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
+}
+
+private Bitmap drawableToBitmap(Drawable drawable) {
+    if (drawable instanceof BitmapDrawable) {
+        return ((BitmapDrawable) drawable).getBitmap();
+    }
+    Bitmap bmp = Bitmap.createBitmap(
+        drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(),
+        Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(bmp);
+    drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+    drawable.draw(canvas);
+    return bmp;
+}
+```
+
+Update `hideApp()` to cache the icon:
+
+```java
+public void hideApp(String packageName) {
+    String label = getAppLabel(packageName);
+    cacheAppIcon(packageName);  // cache icon BEFORE hiding
+
+    pm.setApplicationHiddenSetting(packageName, true);
+
+    HiddenApp record = new HiddenApp(packageName, label, null, System.currentTimeMillis());
+    db.hiddenAppDao().insert(record);
+}
+```
+
+#### Removing stale shortcuts
+
+When a user permanently unhides an app, remove any corresponding pinned shortcut:
+
+```java
+// AppRepository.java
+
+public void unhideApp(String packageName) {
+    pm.setApplicationHiddenSetting(packageName, false);
+    db.hiddenAppDao().delete(packageName);
+    pendingRehide.remove(packageName);
+    persistPendingRehide();
+
+    // Remove pinned shortcut
+    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
+    sm.disableShortcuts(List.of("lokker_" + packageName));
+
+    // Clean up cached icon
+    new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
+}
+```
+
+#### AuthActivity handling
+
+`AuthActivity` already supports `target_package` extras (Section 6). The shortcut intent uses action `com.lokker.app.LAUNCH_HIDDEN` to distinguish from other entry points, but the auth + launch flow is identical.
+
+#### Manifest addition
+
+```xml
+<!-- AuthActivity needs to accept the shortcut action -->
+<activity android:name=".ui.AuthActivity"
+    android:excludeFromRecents="true"
+    android:showWhenLocked="true">
+    <intent-filter>
+        <action android:name="com.lokker.app.LAUNCH_HIDDEN"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+    </intent-filter>
+</activity>
+```
+
+#### Key remapper integration
+
+The user configures their key remapper to launch the pinned shortcut (or the explicit intent `com.lokker.app.LAUNCH_HIDDEN` with extra `target_package`). No proxy activity, no framework patch. The remapper triggers Lokker's standard auth flow.
+
+#### UI in hidden apps list
+
+Add "Create shortcut" to the long-press context menu:
+
+```
+┌──────────────────────────────────┐
+│  WhatsApp                        │
+│  com.whatsapp                    │
+├──────────────────────────────────┤
+│  ▶ Launch                        │
+│  🔗 Create shortcut              │
+│  ⌨ Set hotkey                    │
+│  ⊘ Unhide                        │
+└──────────────────────────────────┘
+```
+
 ---
 
 ## 8. Notification Suppression
@@ -863,6 +1015,10 @@ packages/apps/Lokker/
 | Lokker process killed during temp-unhide | **App re-hidden on next start** | `pendingRehide` persisted to EncryptedPrefs; `recoverLeakedApps()` on `Application.onCreate()` |
 | User adds app via GUI picker | App hidden, appears in hidden list | `setApplicationHiddenSetting(true)` + Room insert + LiveData update |
 | User removes app via GUI | App unhidden, disappears from list | `setApplicationHiddenSetting(false)` + Room delete + LiveData update |
+| User creates pinned shortcut | Shortcut appears on home screen with app's icon/label | `ShortcutManager.requestPinShortcut()` → cached icon + `AuthActivity` intent |
+| User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
+| Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
+| User unhides app permanently | Pinned shortcut disabled, icon cache cleaned | `ShortcutManager.disableShortcuts()` + file delete |
 
 ---
 
