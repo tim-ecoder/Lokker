@@ -45,7 +45,7 @@ Single-module Java app. MVVM-lite pattern. No external dependencies beyond Andro
 │   UI Layer   │  ViewModel   │   Services   │  BroadcastRx  │
 │              │              │              │               │
 │ MainActivity │LokkerViewModel│LokkerAccessSvc│ PackageMonitor│
-│ AuthActivity │              │NotifListener │ BootReceiver  │
+│ AuthActivity │              │              │ BootReceiver  │
 │ SetupActivity│              │              │ SecretCodeRx  │
 │ HotkeySetup  │              │              │ ScreenReceiver│
 ├──────────────┴──────────────┴──────────────┴───────────────┤
@@ -53,27 +53,50 @@ Single-module Java app. MVVM-lite pattern. No external dependencies beyond Andro
 │              AppRepository (single source of truth)         │
 ├────────────────────────────┬────────────────────────────────┤
 │       LokkerDatabase       │    EncryptedPreferences        │
-│  Room: HiddenApp, HotkeyMap│  auth hash, self-hide flag     │
+│  Room: HiddenApp, HotkeyMap│  auth hash, self-hide,        │
+│                            │  pendingRehide set             │
 └────────────────────────────┴────────────────────────────────┘
 ```
+
+> **No NotificationListenerService needed.** `setApplicationHiddenSetting` prevents hidden apps from running entirely — they cannot post notifications. See Section 8.
 
 ### Component Responsibilities
 
 | Component | Type | Responsibility |
 |---|---|---|
-| `LokkerAccessibilityService` | AccessibilityService | Detect foreground app changes; **trigger rehide when hidden app loses focus**; remove from Recents; hotkey detection |
-| `LokkerNotificationListener` | NotificationListenerService | Intercept and cancel notifications from hidden packages |
-| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — re-apply hide state after updates |
-| `BootReceiver` | BroadcastReceiver | `BOOT_COMPLETED` — re-apply all component states |
+| `LokkerAccessibilityService` | AccessibilityService | Detect foreground app changes via `TaskStackListener` + `TYPE_WINDOW_STATE_CHANGED`; **trigger rehide when hidden app loses focus**; remove from Recents; hotkey detection |
+| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — re-apply hide state after updates (belt-and-suspenders; system maintains hidden state across updates) |
+| `BootReceiver` | BroadcastReceiver | `BOOT_COMPLETED` — verify all hidden app states (belt-and-suspenders; state persists in packages.xml) |
 | `ScreenReceiver` | BroadcastReceiver | `SCREEN_ON` — re-verify all hidden app states |
-| `SecretCodeReceiver` | BroadcastReceiver | Dialer `*#5655#` → launch AuthActivity |
-| `AppRepository` | Repository | Single interface to Room DB + EncryptedSharedPreferences + PackageManager |
+| `SecretCodeReceiver` | BroadcastReceiver | Dialer `*#5655#` → launch AuthActivity (optional — may not work on all ROMs) |
+| `AppRepository` | Repository | Single interface to Room DB + EncryptedSharedPreferences + `setApplicationHiddenSetting` |
 
 ---
 
 ## 3. App Hiding Mechanism
 
-Core hiding uses `PackageManager.setComponentEnabledSetting()` to disable launcher activity components.
+Core hiding uses the `@hide` API `PackageManager.setApplicationHiddenSetting()` — the system-level hiding API designed for this purpose. This provides **complete invisibility**: the app disappears from Settings → Apps, `pm list packages`, all PackageManager queries, and cannot run any components.
+
+> **Why not `setComponentEnabledSetting`?** That API only disables individual launcher activities — the app remains fully visible in Settings → Apps, storage stats, battery stats, `adb shell pm list packages`, and to other apps with `QUERY_ALL_PACKAGES`. It is wholly inadequate for true hiding.
+
+### API comparison
+
+| Aspect | `setComponentEnabledSetting` | `setApplicationHiddenSetting` |
+|---|---|---|
+| Hidden from launcher | Yes | Yes |
+| Hidden from Settings → Apps | **NO** | **YES** |
+| Hidden from `pm list packages` | **NO** | **YES** |
+| Hidden from other apps' queries | **NO** | **YES** |
+| Prevents app from running | **NO** (services/receivers still work) | **YES** |
+| Notifications blocked inherently | **NO** (need NotificationListenerService) | **YES** (app can't run) |
+| Persists across reboot | Yes | Yes |
+| Persists across app update | Fragile (need PackageMonitor) | Yes (system maintains) |
+| Data preserved | Yes | Yes |
+| Permission | `CHANGE_COMPONENT_ENABLED_STATE` | `MANAGE_USERS` (signature) |
+
+### Permission
+
+`setApplicationHiddenSetting()` requires `MANAGE_USERS` (signature|privileged). Since Lokker is built with `certificate: "platform"` in the AOSP tree, this permission is granted automatically. Must also be whitelisted in `privapp-permissions-lokker.xml`.
 
 ### hideApp(packageName)
 
@@ -81,35 +104,16 @@ Core hiding uses `PackageManager.setComponentEnabledSetting()` to disable launch
 // AppRepository.java
 
 public void hideApp(String packageName) {
-    Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
-    launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-    launcherIntent.setPackage(packageName);
+    // Cache app label BEFORE hiding (queries won't work after)
+    String label = getAppLabel(packageName);
 
-    // queryIntentActivities works for priv-app even on API 35
-    List<ResolveInfo> activities = pm.queryIntentActivities(
-        launcherIntent,
-        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_ALL)
-    );
+    // System-level hide — app disappears from Settings, pm list, all queries
+    pm.setApplicationHiddenSetting(packageName, true);
 
-    List<String> componentNames = new ArrayList<>();
-    for (ResolveInfo info : activities) {
-        ComponentName cn = new ComponentName(
-            info.activityInfo.packageName,
-            info.activityInfo.name
-        );
-        pm.setComponentEnabledSetting(
-            cn,
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            PackageManager.DONT_KILL_APP
-        );
-        componentNames.add(info.activityInfo.name);
-    }
-
-    // Persist to Room
+    // Persist to Room for our own tracking (hotkeys, labels, etc.)
     HiddenApp record = new HiddenApp(
         packageName,
-        componentNames,
-        getAppLabel(packageName),
+        label,
         null, // hotkeySequence
         System.currentTimeMillis()
     );
@@ -117,25 +121,29 @@ public void hideApp(String packageName) {
 }
 ```
 
+> **Note:** `setApplicationHiddenSetting` is a `@hide` API. In AOSP builds (Android.bp with `platform_apis: true`), it is callable directly. If building against SDK stubs, use reflection:
+> ```java
+> Method m = PackageManager.class.getMethod(
+>     "setApplicationHiddenSetting", String.class, boolean.class);
+> m.invoke(pm, packageName, true);
+> ```
+
 ### unhideTemporarily(packageName)
 
-Called before launching a hidden app through Lokker UI. Re-enables components temporarily; `LokkerAccessibilityService` will rehide when the app loses foreground.
+Called before launching a hidden app through Lokker UI. Unhides the entire application; `LokkerAccessibilityService` will rehide when the app loses foreground.
 
 ```java
 public boolean unhideTemporarily(String packageName) {
     HiddenApp record = db.hiddenAppDao().get(packageName);
     if (record == null) return false;
 
-    for (String activityName : record.getDisabledComponents()) {
-        pm.setComponentEnabledSetting(
-            new ComponentName(packageName, activityName),
-            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
-            PackageManager.DONT_KILL_APP
-        );
-    }
+    // Unhide at system level — app becomes fully functional
+    pm.setApplicationHiddenSetting(packageName, false);
 
-    // LokkerAccessibilityService will re-hide when app loses foreground
+    // Persist pending state to survive process death
     pendingRehide.add(packageName);
+    persistPendingRehide();
+
     return true;
 }
 ```
@@ -146,21 +154,57 @@ Called when user removes an app from the hidden list via the GUI.
 
 ```java
 public void unhideApp(String packageName) {
-    HiddenApp record = db.hiddenAppDao().get(packageName);
-    if (record == null) return;
-
-    for (String activityName : record.getDisabledComponents()) {
-        pm.setComponentEnabledSetting(
-            new ComponentName(packageName, activityName),
-            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
-            PackageManager.DONT_KILL_APP
-        );
-    }
+    // Unhide at system level
+    pm.setApplicationHiddenSetting(packageName, false);
 
     db.hiddenAppDao().delete(packageName);
     pendingRehide.remove(packageName);
+    persistPendingRehide();
 }
 ```
+
+### pendingRehide persistence
+
+The set of temporarily-unhidden apps **must** survive process death. If Lokker is killed while an app is temporarily visible, the app must be re-hidden on next start.
+
+```java
+// AppRepository.java
+
+private Set<String> pendingRehide = new HashSet<>();
+
+private void persistPendingRehide() {
+    encryptedPrefs.edit()
+        .putStringSet("pending_rehide", pendingRehide)
+        .apply();
+}
+
+private void loadPendingRehide() {
+    pendingRehide = new HashSet<>(
+        encryptedPrefs.getStringSet("pending_rehide", Collections.emptySet())
+    );
+}
+
+/** Called from LokkerApp.onCreate() — re-hide any leaked apps */
+public void recoverLeakedApps() {
+    loadPendingRehide();
+    for (String pkg : new HashSet<>(pendingRehide)) {
+        pm.setApplicationHiddenSetting(pkg, true);
+        pendingRehide.remove(pkg);
+    }
+    persistPendingRehide();
+}
+```
+
+### Remaining visibility leaks
+
+Even with `setApplicationHiddenSetting`, these cannot be prevented:
+
+| Leak | Notes |
+|---|---|
+| `pm list packages -u` (ADB) | Shows hidden packages — requires ADB/root, outside threat model |
+| `/data/app/` filesystem | APK still on disk — requires root |
+| Usage stats from before hiding | Can clear via `UsageStatsManager` with system permission |
+| Briefly visible during temp-unhide | Exposed only while user is actively using the app |
 
 ---
 
@@ -168,7 +212,31 @@ public void unhideApp(String packageName) {
 
 **This is the critical behavioral feature.** When a hidden app is temporarily unlocked and the user navigates away (Home, Back, Recents, or simply opening another app), the hidden app must immediately be re-hidden and removed from Recents.
 
-### Detection via AccessibilityService
+### Detection — dual mechanism
+
+Two independent foreground-detection systems ensure reliability:
+
+#### Primary: TaskStackListener (AOSP @hide API)
+
+More reliable than AccessibilityService for detecting task/foreground changes. Available to platform-signed apps.
+
+```java
+// LokkerAccessibilityService.java — registers on service start
+
+private void registerTaskStackListener() {
+    IActivityTaskManager atm = ActivityTaskManager.getService();
+    atm.registerTaskStackListener(new TaskStackListener() {
+        @Override
+        public void onTaskMovedToFront(ActivityManager.RunningTaskInfo info) {
+            String pkg = info.baseActivity != null
+                ? info.baseActivity.getPackageName() : null;
+            handleForegroundChange(pkg);
+        }
+    });
+}
+```
+
+#### Secondary: AccessibilityService (fallback)
 
 ```java
 // LokkerAccessibilityService.java
@@ -183,21 +251,34 @@ public void onAccessibilityEvent(AccessibilityEvent event) {
     if (pkgSeq == null) return;
     String pkg = pkgSeq.toString();
 
-    // A different app came to foreground
     if (!pkg.equals(currentForegroundPkg)) {
-        String prev = currentForegroundPkg;
-        currentForegroundPkg = pkg;
-
-        // Was the previous app a temporarily-unlocked hidden app?
-        if (prev != null && repo.isPendingRehide(prev)) {
-            // Re-disable component immediately
-            repo.hideApp(prev);
-            // Remove from Recents
-            repo.removeFromRecents(prev);
-            // Clear pending state
-            repo.removePendingRehide(prev);
-        }
+        handleForegroundChange(pkg);
     }
+}
+```
+
+#### Shared rehide logic
+
+```java
+private void handleForegroundChange(String newPkg) {
+    String prev = currentForegroundPkg;
+    currentForegroundPkg = newPkg;
+
+    if (prev != null && repo.isPendingRehide(prev)) {
+        // Re-hide at system level — complete invisibility restored
+        repo.rehideApp(prev);
+        // Remove from Recents
+        repo.removeFromRecents(prev);
+    }
+}
+```
+
+```java
+// AppRepository.java
+public void rehideApp(String packageName) {
+    pm.setApplicationHiddenSetting(packageName, true);
+    pendingRehide.remove(packageName);
+    persistPendingRehide();
 }
 ```
 
@@ -206,6 +287,9 @@ public void onAccessibilityEvent(AccessibilityEvent event) {
 ```java
 // Mechanism 1: Flags at launch time
 public void launchHiddenApp(String packageName) {
+    // Must unhide before getLaunchIntentForPackage (hidden apps return null)
+    unhideTemporarily(packageName);
+
     Intent intent = pm.getLaunchIntentForPackage(packageName);
     if (intent == null) return;
     intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
@@ -232,17 +316,22 @@ public void removeFromRecents(String packageName) {
 ```
 User opens hidden app via Lokker
   → Auth (biometric/PIN)
-  → unhideTemporarily() — re-enables launcher component
-  → app added to pendingRehide set
+  → unhideTemporarily() — setApplicationHiddenSetting(pkg, false)
+  → pendingRehide persisted to EncryptedPrefs
   → startActivity with EXCLUDE_FROM_RECENTS flags
   → user uses the app normally
   → user presses Home / Back / switches app
-  → AccessibilityService detects TYPE_WINDOW_STATE_CHANGED
+  → TaskStackListener OR AccessibilityService detects foreground change
   → previous package was in pendingRehide
-  → hideApp() — re-disables component
+  → setApplicationHiddenSetting(pkg, true) — full system-level re-hide
   → removeFromRecents() — clears from task list
-  → done — app is invisible again
+  → pendingRehide cleared and persisted
+  → done — app is completely invisible again
 ```
+
+### Process death recovery
+
+If Lokker is killed while an app is temporarily unhidden, `LokkerApp.onCreate()` calls `recoverLeakedApps()` which scans the persisted `pendingRehide` set and re-hides any leaked apps immediately (see Section 3).
 
 ---
 
@@ -477,38 +566,11 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 
 ## 8. Notification Suppression
 
-```java
-// LokkerNotificationListener.java
+**Not needed.** With `setApplicationHiddenSetting`, hidden apps cannot run any components — no services, no receivers, no alarms. They **cannot post notifications**. The system blocks all component starts for hidden packages at the `PackageManagerService` level.
 
-public class LokkerNotificationListener extends NotificationListenerService {
+> **Note:** During the brief temp-unhide window (while user is actively using a hidden app), the app CAN post notifications. These are acceptable because the user is actively using the app. When the app is re-hidden via `setApplicationHiddenSetting(pkg, true)`, the app is force-stopped and any pending notifications are cleared by the system.
 
-    @Override
-    public void onNotificationPosted(StatusBarNotification sbn) {
-        String pkg = sbn.getPackageName();
-        if (repo.isHidden(pkg)) {
-            cancelNotification(sbn.getKey());
-            // Also clear grouped notifications
-            for (StatusBarNotification n : getActiveNotifications()) {
-                if (pkg.equals(n.getPackageName())) {
-                    cancelNotification(n.getKey());
-                }
-            }
-        }
-    }
-
-    @Override
-    public void onListenerConnected() {
-        // On connect: cancel existing notifications from hidden apps
-        for (StatusBarNotification sbn : getActiveNotifications()) {
-            if (repo.isHidden(sbn.getPackageName())) {
-                cancelNotification(sbn.getKey());
-            }
-        }
-    }
-}
-```
-
-> **Note:** NotificationListenerService needs user to enable in Settings → Notifications → Notification access. For priv-app, auto-grant via `WRITE_SECURE_SETTINGS`: `Settings.Secure.putString(resolver, "enabled_notification_listeners", "com.lokker.app/.service.LokkerNotificationListener")`
+`LokkerNotificationListener` is removed from the architecture. No `NotificationListenerService` permission is needed.
 
 ---
 
@@ -580,12 +642,12 @@ private void launchAuth(String targetPackage) {
 
 ```java
 // HiddenApp.java — Entity
+// NOTE: No disabledComponents field needed — setApplicationHiddenSetting
+// hides the entire application at the system level.
 @Entity(tableName = "hidden_apps")
 public class HiddenApp {
     @PrimaryKey @NonNull
     public String packageName;
-    @TypeConverters(Converters.class)
-    public List<String> disabledComponents;
     public String appLabel;
     @TypeConverters(Converters.class)
     public List<Integer> hotkeySequence; // nullable, per-app hotkey
@@ -653,7 +715,8 @@ public class LokkerPrefs {
     // "self_hidden"      — boolean
     // "fail_count"       — int (auth failure counter)
     // "lockout_until"    — long (timestamp)
-    // "notif_auto_granted" — boolean
+    // "pending_rehide"    — StringSet (packages temporarily unhidden)
+    // NOTE: "notif_auto_granted" removed — NLS no longer needed
 }
 ```
 
@@ -669,7 +732,8 @@ android_app {
     srcs: ["src/**/*.java"],
     privileged: true,
     certificate: "platform",
-    sdk_version: "35",
+    platform_apis: true,
+    sdk_version: "",
     min_sdk_version: "35",
     static_libs: [
         "androidx.core_core",
@@ -693,6 +757,7 @@ android_app {
 ```xml
 <permissions>
     <privapp-permissions package="com.lokker.app">
+        <permission name="android.permission.MANAGE_USERS"/>
         <permission name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
         <permission name="android.permission.REMOVE_TASKS"/>
         <permission name="android.permission.GET_TASKS"/>
@@ -702,6 +767,8 @@ android_app {
     </privapp-permissions>
 </permissions>
 ```
+
+> **Note:** `MANAGE_USERS` is the key permission for `setApplicationHiddenSetting()`. `CHANGE_COMPONENT_ENABLED_STATE` is retained only for Lokker's own self-hiding via activity-alias (Section 5).
 
 ### device.mk integration
 
@@ -749,8 +816,7 @@ packages/apps/Lokker/
         │   ├── SecretCodeReceiver.java     # dialer *#5655# → open auth
         │   └── ScreenReceiver.java         # SCREEN_ON → re-verify states
         ├── service/
-        │   ├── LokkerAccessibilityService.java   # foreground monitor + rehide + hotkey
-        │   └── LokkerNotificationListener.java   # notification suppression
+        │   └── LokkerAccessibilityService.java   # foreground monitor + rehide + hotkey + TaskStackListener
         ├── ui/
         │   ├── MainActivity.java           # hidden apps list, FAB, settings menu
         │   ├── AuthActivity.java           # PIN + biometric gate
@@ -781,19 +847,22 @@ packages/apps/Lokker/
 
 | Scenario | Expected Behavior | Mechanism |
 |---|---|---|
-| User opens launcher | Hidden app icon not visible | `setComponentEnabledSetting DISABLED` |
+| User opens launcher | Hidden app icon not visible | `setApplicationHiddenSetting(pkg, true)` |
+| User opens Settings → Apps | **Hidden app NOT listed** | `setApplicationHiddenSetting` — complete system-level hiding |
+| User runs `pm list packages` | **Hidden app NOT listed** | Same (hidden from all PM queries) |
 | User opens Lokker (icon hidden) | Lokker not visible in launcher | `setComponentEnabledSetting` on self alias |
 | User presses hotkey | Auth prompt → Lokker UI opens | `onKeyEvent` intercept → `BiometricPrompt` |
-| User launches hidden app via Lokker | Auth → app launches normally | Temp re-enable → `startActivity` → rehide on switch |
-| **User switches away from hidden app** | **App re-hides immediately, removed from Recents** | **`TYPE_WINDOW_STATE_CHANGED` → `hideApp()` + `removeTask()`** |
+| User launches hidden app via Lokker | Auth → app launches normally | `setApplicationHiddenSetting(false)` → `startActivity` → rehide on switch |
+| **User switches away from hidden app** | **App re-hides immediately, removed from Recents** | **`TaskStackListener` + `TYPE_WINDOW_STATE_CHANGED` → `setApplicationHiddenSetting(true)` + `removeTask()`** |
 | User presses Home in hidden app | App re-hides, removed from Recents | Same as above |
 | User presses Back out of hidden app | App re-hides, removed from Recents | Same as above |
 | User opens Recents while in hidden app | App re-hides, not visible in Recents | Same + `FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS` |
-| Hidden app sends notification | Notification suppressed | `NotificationListenerService.cancelNotification` |
-| Hidden app updated via system | Stays hidden after update | `PACKAGE_REPLACED` broadcast → re-disable |
-| Device reboots | All hidden apps remain hidden | `packages.xml` + `BOOT_COMPLETED` re-apply |
-| User adds app via GUI picker | App hidden, appears in hidden list | `hideApp()` + Room insert + LiveData update |
-| User removes app via GUI | App unhidden, disappears from list | `unhideApp()` + Room delete + LiveData update |
+| Hidden app tries to send notification | **Impossible** — app cannot run while hidden | `setApplicationHiddenSetting` blocks all component starts |
+| Hidden app updated via system | Stays hidden after update | System maintains hidden state; `PackageMonitor` as safety check |
+| Device reboots | All hidden apps remain hidden | `packages.xml` persists; `BootReceiver` verifies |
+| Lokker process killed during temp-unhide | **App re-hidden on next start** | `pendingRehide` persisted to EncryptedPrefs; `recoverLeakedApps()` on `Application.onCreate()` |
+| User adds app via GUI picker | App hidden, appears in hidden list | `setApplicationHiddenSetting(true)` + Room insert + LiveData update |
+| User removes app via GUI | App unhidden, disappears from list | `setApplicationHiddenSetting(false)` + Room delete + LiveData update |
 
 ---
 
@@ -812,6 +881,7 @@ packages/apps/Lokker/
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
 
     <!-- Privileged permissions (whitelisted in privapp XML) -->
+    <uses-permission android:name="android.permission.MANAGE_USERS"/>
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
     <uses-permission android:name="android.permission.REMOVE_TASKS"/>
     <uses-permission android:name="android.permission.GET_TASKS"/>
@@ -821,24 +891,31 @@ packages/apps/Lokker/
 </manifest>
 ```
 
+> **Permission notes:**
+> - `MANAGE_USERS` — required for `setApplicationHiddenSetting()` (the core hiding API)
+> - `CHANGE_COMPONENT_ENABLED_STATE` — only used for Lokker's own self-hiding (activity-alias)
+> - No `NotificationListenerService` declaration needed — hidden apps cannot post notifications
+
 ---
 
 ## 15. Development Phases
 
 ### Phase 1 — Foundation (~3 days)
-- AOSP module scaffold: `Android.bp`, manifest, build integration
-- `privapp-permissions` XML + `device.mk` wiring
-- `LokkerDatabase` (Room) + `HiddenApp` entity + DAO
-- `LokkerPrefs` (EncryptedSharedPreferences)
-- `AppRepository` skeleton with PackageManager wiring
-- Verify `setComponentEnabledSetting` works as priv-app on device
+- AOSP module scaffold: `Android.bp` (with `platform_apis: true`), manifest, build integration
+- `privapp-permissions` XML (including `MANAGE_USERS`) + `device.mk` wiring
+- `LokkerDatabase` (Room) + `HiddenApp` entity (no `disabledComponents`) + DAO
+- `LokkerPrefs` (EncryptedSharedPreferences) with `pendingRehide` persistence
+- `AppRepository` skeleton with `setApplicationHiddenSetting` wiring
+- `LokkerApp.onCreate()` → `recoverLeakedApps()` (re-hide any leaked apps)
+- Verify `setApplicationHiddenSetting` works as priv-app on device
+- Verify hidden app disappears from Settings → Apps
 
-### Phase 2 — Core Hiding (~3 days)
-- `hideApp()` / `unhideApp()` / `unhideTemporarily()` full implementation
-- `BootReceiver` — re-apply all hidden states on boot
-- `PackageMonitor` — `PACKAGE_REPLACED` / `PACKAGE_ADDED` handling
-- Self-hiding via activity-alias disable
-- `SecretCodeReceiver` (dialer code entry)
+### Phase 2 — Core Hiding (~2 days)
+- `hideApp()` / `unhideApp()` / `unhideTemporarily()` / `rehideApp()` full implementation
+- `BootReceiver` — verify all hidden app states on boot (belt-and-suspenders)
+- `PackageMonitor` — `PACKAGE_REPLACED` / `PACKAGE_ADDED` safety check
+- Self-hiding via activity-alias `setComponentEnabledSetting` (Lokker's own icon only)
+- `SecretCodeReceiver` (dialer code entry — optional, may not work on all ROMs)
 
 ### Phase 3 — GUI (~3 days)
 - `MainActivity` layout: RecyclerView + FAB + toolbar menu
@@ -859,28 +936,27 @@ packages/apps/Lokker/
 
 ### Phase 5 — Accessibility + Rehide (~3 days)
 - `LokkerAccessibilityService` scaffold + manifest declaration
-- `TYPE_WINDOW_STATE_CHANGED` → detect foreground app change
-- `pendingRehide` set: track temporarily-unlocked apps
-- **Rehide on app switch** — re-disable + remove from Recents
-- `removeFromRecents()` via `ActivityManager.removeTask()`
+- `TaskStackListener` registration (primary foreground detection)
+- `TYPE_WINDOW_STATE_CHANGED` (secondary/fallback foreground detection)
+- `pendingRehide` set: persisted to EncryptedPrefs, track temporarily-unlocked apps
+- **Rehide on app switch** — `setApplicationHiddenSetting(true)` + `removeTask()`
 - `FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS` on launch
 - Auto-enable Accessibility via `WRITE_SECURE_SETTINGS`
 
-### Phase 6 — Notifications + Hotkeys (~2 days)
-- `LokkerNotificationListener`: cancel notifications for hidden packages
-- Auto-grant notification listener access via `Settings.Secure`
+### Phase 6 — Hotkeys (~2 days)
 - `HotkeyManager`: sequence buffer + timeout logic
 - `onKeyEvent` in AccessibilityService
 - `HotkeySetupActivity`: record and save sequences
 - Per-app hotkey support
 
 ### Phase 7 — Polish & Testing (~3 days)
-- Edge cases: apps with multiple LAUNCHER activities
+- Verify: hidden apps invisible in Settings → Apps, `pm list packages`, battery stats
 - Edge cases: apps that re-enable themselves
+- Process death recovery: kill Lokker during temp-unhide, verify rehide on restart
 - Test on LineageOS 22 device
 - Dark theme, edge-to-edge (Android 15 mandatory)
 - No-icon mode: verify Lokker invisible in all launchers
 - Stress test: hide/unhide 20+ apps
 - `ScreenReceiver`: on unlock re-check all hidden state integrity
 
-**Total estimate: ~19 developer-days for solo dev**
+**Total estimate: ~18 developer-days for solo dev**
