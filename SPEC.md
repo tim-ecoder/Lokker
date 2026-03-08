@@ -394,6 +394,21 @@ public void setSelfHidden(boolean hidden) {
 }
 ```
 
+### Auto-unhide on reinstall
+
+When Lokker itself is reinstalled (or updated), it **must** reset to visible in the launcher. On reinstall, `setComponentEnabledSetting` resets to the manifest default (enabled), so the alias is already restored. `PackageMonitor` detects `PACKAGE_REPLACED` for Lokker's own package and clears the `self_hidden` pref to keep state consistent:
+
+```java
+// In PackageMonitor.onReceive():
+if (packageName.equals(ctx.getPackageName())) {
+    // Lokker was reinstalled/updated — ensure it's visible in launcher
+    prefs.edit().putBoolean("self_hidden", false).apply();
+    return; // don't process as a hidden app
+}
+```
+
+This prevents a scenario where the pref says "self-hidden" but the alias was already reset by the system, and ensures the user can always find Lokker in the launcher after reinstalling.
+
 ### Secret entry via dialer
 
 Register `*#LOKK#` (`*#5655#`) as a secret code:
@@ -1117,6 +1132,7 @@ packages/apps/Lokker/
 | User opens Recents while in hidden app | App re-hides, not visible in Recents | Same + `FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS` |
 | Hidden app tries to send notification | **Impossible** — app cannot run while hidden | `setApplicationHiddenSetting` blocks all component starts |
 | Hidden app updated via system | Stays hidden after update | System maintains hidden state; `PackageMonitor` as safety check |
+| Lokker reinstalled/updated | Lokker visible in launcher, `self_hidden` pref cleared | `PackageMonitor` detects own package → clears `self_hidden`; alias resets to manifest default (enabled) |
 | Device reboots | All hidden apps remain hidden | `packages.xml` persists; `BootReceiver` verifies |
 | Lokker process killed during temp-unhide | **App re-hidden on next start** | `pendingRehide` persisted to EncryptedPrefs; `recoverLeakedApps()` on `Application.onCreate()` |
 | User adds app via GUI picker | App hidden, appears in hidden list | `setApplicationHiddenSetting(true)` + Room insert + LiveData update |
