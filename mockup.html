@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lokker — Кликабельный макет</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Roboto', sans-serif;
+  background: #121212;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  color: #E0E0E0;
+}
+
+/* Phone frame */
+.phone {
+  width: 390px;
+  height: 844px;
+  background: #121212;
+  border-radius: 40px;
+  border: 3px solid #333;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 0 60px rgba(0,0,0,0.5);
+}
+
+/* Status bar */
+.status-bar {
+  height: 44px;
+  background: #1E1E1E;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  font-size: 12px;
+  color: #999;
+  z-index: 100;
+}
+.status-bar .time { font-weight: 500; }
+.status-bar .icons { display: flex; gap: 4px; align-items: center; }
+
+/* Nav bar */
+.nav-bar {
+  height: 32px;
+  background: #121212;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+}
+.nav-bar .handle {
+  width: 134px;
+  height: 5px;
+  background: #555;
+  border-radius: 3px;
+}
+
+/* Screen container */
+.screen {
+  position: absolute;
+  top: 44px;
+  bottom: 32px;
+  left: 0;
+  right: 0;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  background: #121212;
+}
+.screen.active {
+  display: flex;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Toolbar */
+.toolbar {
+  height: 56px;
+  background: #1E1E1E;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.toolbar .back-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: none;
+  color: #E0E0E0;
+  cursor: pointer;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+.toolbar .back-btn:hover { background: rgba(255,255,255,0.08); }
+.toolbar .title {
+  font-size: 20px;
+  font-weight: 500;
+  flex: 1;
+  padding-left: 8px;
+}
+.toolbar .action-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: none;
+  color: #E0E0E0;
+  cursor: pointer;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.toolbar .action-btn:hover { background: rgba(255,255,255,0.08); }
+
+/* Search bar */
+.search-bar {
+  margin: 12px 16px 8px;
+  background: #2A2A2A;
+  border-radius: 28px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.search-bar .material-symbols-outlined { color: #888; font-size: 22px; }
+.search-bar input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #E0E0E0;
+  font-size: 16px;
+  font-family: 'Roboto', sans-serif;
+}
+.search-bar input::placeholder { color: #666; }
+
+/* App list */
+.app-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.app-list::-webkit-scrollbar { width: 4px; }
+.app-list::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+.app-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.app-item:hover { background: rgba(255,255,255,0.05); }
+.app-item:active { background: rgba(255,255,255,0.1); }
+
+.app-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+  color: #fff;
+  font-weight: 700;
+}
+.app-info { flex: 1; min-width: 0; }
+.app-info .name {
+  font-size: 16px;
+  font-weight: 400;
+  color: #E0E0E0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-info .package {
+  font-size: 13px;
+  color: #777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.app-action-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  color: #888;
+  cursor: pointer;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.app-action-btn:hover { background: rgba(255,255,255,0.08); color: #BB86FC; }
+
+/* FAB */
+.fab {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  background: #BB86FC;
+  border-radius: 16px;
+  border: none;
+  color: #000;
+  font-size: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(187,134,252,0.3);
+  transition: transform 0.15s, box-shadow 0.15s;
+  z-index: 10;
+}
+.fab:hover { transform: scale(1.05); box-shadow: 0 6px 24px rgba(187,134,252,0.4); }
+.fab:active { transform: scale(0.95); }
+
+/* Empty state */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  color: #666;
+}
+.empty-state .material-symbols-outlined { font-size: 72px; color: #444; }
+.empty-state p { text-align: center; font-size: 15px; line-height: 1.5; }
+
+/* Checkbox */
+.checkbox {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #888;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.checkbox.checked {
+  background: #BB86FC;
+  border-color: #BB86FC;
+}
+.checkbox.checked::after {
+  content: '✓';
+  color: #000;
+  font-size: 16px;
+  font-weight: 700;
+}
+.checkbox.disabled {
+  border-color: #444;
+  background: #333;
+  cursor: default;
+}
+
+/* Bottom button bar */
+.bottom-bar {
+  padding: 12px 16px;
+  background: #1E1E1E;
+  flex-shrink: 0;
+}
+.primary-btn {
+  width: 100%;
+  height: 48px;
+  background: #BB86FC;
+  color: #000;
+  border: none;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'Roboto', sans-serif;
+  transition: opacity 0.15s;
+}
+.primary-btn:hover { opacity: 0.9; }
+.primary-btn:active { opacity: 0.8; }
+.primary-btn:disabled { background: #444; color: #888; cursor: default; }
+
+/* Toggle switch row */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  gap: 16px;
+  cursor: pointer;
+}
+.toggle-row:hover { background: rgba(255,255,255,0.05); }
+.toggle-info { flex: 1; }
+.toggle-info .toggle-label { font-size: 16px; color: #E0E0E0; }
+.toggle-info .toggle-desc { font-size: 13px; color: #777; margin-top: 4px; }
+
+.toggle-switch {
+  width: 52px;
+  height: 28px;
+  background: #555;
+  border-radius: 14px;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.toggle-switch.on { background: #BB86FC; }
+.toggle-switch .knob {
+  width: 22px;
+  height: 22px;
+  background: #E0E0E0;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+}
+.toggle-switch.on .knob {
+  transform: translateX(24px);
+  background: #fff;
+}
+
+/* Settings item */
+.settings-item {
+  display: flex;
+  align-items: center;
+  padding: 16px;
+  gap: 16px;
+  cursor: pointer;
+}
+.settings-item:hover { background: rgba(255,255,255,0.05); }
+.settings-item .material-symbols-outlined { color: #888; font-size: 24px; flex-shrink: 0; }
+.settings-item .settings-info { flex: 1; }
+.settings-item .settings-label { font-size: 16px; color: #E0E0E0; }
+.settings-item .settings-desc { font-size: 13px; color: #777; margin-top: 2px; }
+
+/* Divider */
+.divider {
+  height: 1px;
+  background: #2A2A2A;
+  margin: 4px 16px;
+}
+
+/* Section header */
+.section-header {
+  padding: 16px 16px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #BB86FC;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Auth screen */
+.auth-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  gap: 24px;
+}
+.auth-logo {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, #BB86FC 0%, #6200EA 100%);
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  color: #fff;
+  font-weight: 700;
+}
+.auth-title {
+  font-size: 24px;
+  font-weight: 500;
+  color: #E0E0E0;
+}
+.auth-subtitle {
+  font-size: 14px;
+  color: #888;
+  text-align: center;
+}
+.pin-dots {
+  display: flex;
+  gap: 16px;
+  margin: 16px 0;
+}
+.pin-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #666;
+  transition: all 0.15s;
+}
+.pin-dot.filled {
+  background: #BB86FC;
+  border-color: #BB86FC;
+}
+.pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  width: 280px;
+  margin-top: 8px;
+}
+.pin-key {
+  width: 80px;
+  height: 64px;
+  border: none;
+  background: #2A2A2A;
+  color: #E0E0E0;
+  font-size: 24px;
+  font-weight: 400;
+  border-radius: 16px;
+  cursor: pointer;
+  font-family: 'Roboto', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+.pin-key:hover { background: #3A3A3A; }
+.pin-key:active { background: #4A4A4A; }
+.pin-key.empty { background: transparent; cursor: default; }
+.pin-key .material-symbols-outlined { font-size: 24px; }
+.biometric-btn {
+  margin-top: 8px;
+  background: none;
+  border: 1px solid #BB86FC;
+  color: #BB86FC;
+  padding: 12px 24px;
+  border-radius: 24px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: 'Roboto', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.biometric-btn:hover { background: rgba(187,134,252,0.1); }
+
+/* Setup screen */
+.setup-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 24px;
+  gap: 24px;
+}
+.setup-step {
+  font-size: 14px;
+  color: #BB86FC;
+  font-weight: 500;
+}
+.setup-title {
+  font-size: 28px;
+  font-weight: 500;
+  color: #E0E0E0;
+  line-height: 1.3;
+}
+.setup-desc {
+  font-size: 15px;
+  color: #888;
+  line-height: 1.5;
+}
+.text-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.text-input-group label {
+  font-size: 13px;
+  color: #BB86FC;
+  font-weight: 500;
+}
+.text-input {
+  height: 52px;
+  background: #2A2A2A;
+  border: 1px solid #444;
+  border-radius: 12px;
+  padding: 0 16px;
+  color: #E0E0E0;
+  font-size: 16px;
+  font-family: 'Roboto', sans-serif;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.text-input:focus { border-color: #BB86FC; }
+.text-input::placeholder { color: #666; }
+
+.setup-bottom {
+  margin-top: auto;
+}
+
+/* Hotkey setup */
+.hotkey-recorder {
+  background: #2A2A2A;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0;
+}
+.hotkey-sequence {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.key-badge {
+  background: #3A3A3A;
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: #E0E0E0;
+  font-weight: 500;
+}
+.key-badge.active {
+  border-color: #BB86FC;
+  background: rgba(187,134,252,0.15);
+  color: #BB86FC;
+}
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #888;
+}
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #CF6679;
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Dialog overlay */
+.dialog-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: flex-end;
+  z-index: 50;
+}
+.dialog-overlay.active { display: flex; }
+.dialog-sheet {
+  background: #1E1E1E;
+  border-radius: 28px 28px 0 0;
+  width: 100%;
+  max-height: 80%;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.25s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.dialog-handle {
+  width: 40px;
+  height: 4px;
+  background: #555;
+  border-radius: 2px;
+  margin: 12px auto;
+}
+
+/* Context menu */
+.context-menu {
+  position: absolute;
+  background: #2A2A2A;
+  border-radius: 12px;
+  padding: 8px 0;
+  min-width: 220px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 60;
+  display: none;
+}
+.context-menu.active { display: block; }
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  color: #E0E0E0;
+}
+.context-menu-item:hover { background: rgba(255,255,255,0.08); }
+.context-menu-item .material-symbols-outlined { font-size: 22px; color: #888; }
+
+/* Toggle row for picker */
+.picker-toggle {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 8px;
+  font-size: 14px;
+  color: #888;
+}
+.mini-switch {
+  width: 36px;
+  height: 20px;
+  background: #555;
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.mini-switch.on { background: #BB86FC; }
+.mini-switch .knob {
+  width: 16px;
+  height: 16px;
+  background: #E0E0E0;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+}
+.mini-switch.on .knob { transform: translateX(16px); }
+
+/* Confirm dialog */
+.confirm-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 70;
+  padding: 32px;
+}
+.confirm-overlay.active { display: flex; }
+.confirm-dialog {
+  background: #2A2A2A;
+  border-radius: 28px;
+  padding: 24px;
+  width: 100%;
+  animation: fadeIn 0.15s ease;
+}
+.confirm-dialog h3 { font-size: 20px; font-weight: 500; margin-bottom: 12px; }
+.confirm-dialog p { font-size: 14px; color: #999; line-height: 1.5; margin-bottom: 24px; }
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+.confirm-actions button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'Roboto', sans-serif;
+}
+.btn-cancel { background: none; color: #BB86FC; }
+.btn-cancel:hover { background: rgba(187,134,252,0.1); }
+.btn-confirm { background: #BB86FC; color: #000; }
+.btn-confirm:hover { opacity: 0.9; }
+
+/* Snackbar */
+.snackbar {
+  position: absolute;
+  bottom: 48px;
+  left: 16px;
+  right: 16px;
+  background: #333;
+  color: #E0E0E0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  z-index: 80;
+  display: none;
+  animation: slideUp 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.snackbar.active { display: block; }
+
+/* Hidden label */
+.hidden-label {
+  font-size: 12px;
+  color: #BB86FC;
+  background: rgba(187,134,252,0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* About section */
+.about-section {
+  padding: 24px;
+  text-align: center;
+  color: #555;
+  font-size: 13px;
+}
+.about-section .version { margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="phone" id="phone">
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span class="time">12:34</span>
+    <div class="icons">
+      <span style="font-size:14px">&#9679;&#9679;&#9679;&#9679;</span>
+      <span style="font-size:14px">&#128267;</span>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: AUTH ===================== -->
+  <div class="screen active" id="screen-auth">
+    <div class="auth-container">
+      <div class="auth-logo">L</div>
+      <div class="auth-title">Lokker</div>
+      <div class="auth-subtitle">Введите PIN для продолжения</div>
+      <div class="pin-dots" id="pin-dots">
+        <div class="pin-dot" data-i="0"></div>
+        <div class="pin-dot" data-i="1"></div>
+        <div class="pin-dot" data-i="2"></div>
+        <div class="pin-dot" data-i="3"></div>
+      </div>
+      <div class="pin-pad">
+        <button class="pin-key" onclick="pinPress('1')">1</button>
+        <button class="pin-key" onclick="pinPress('2')">2</button>
+        <button class="pin-key" onclick="pinPress('3')">3</button>
+        <button class="pin-key" onclick="pinPress('4')">4</button>
+        <button class="pin-key" onclick="pinPress('5')">5</button>
+        <button class="pin-key" onclick="pinPress('6')">6</button>
+        <button class="pin-key" onclick="pinPress('7')">7</button>
+        <button class="pin-key" onclick="pinPress('8')">8</button>
+        <button class="pin-key" onclick="pinPress('9')">9</button>
+        <button class="pin-key empty"></button>
+        <button class="pin-key" onclick="pinPress('0')">0</button>
+        <button class="pin-key" onclick="pinDelete()"><span class="material-symbols-outlined">backspace</span></button>
+      </div>
+      <button class="biometric-btn" onclick="biometricAuth()">
+        <span class="material-symbols-outlined">fingerprint</span>
+        Биометрия
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: SETUP ===================== -->
+  <div class="screen" id="screen-setup">
+    <div class="setup-container">
+      <div class="setup-step">Шаг 1 из 2</div>
+      <div class="setup-title">Создайте пароль для Lokker</div>
+      <div class="setup-desc">Этот пароль будет использоваться для защиты скрытых приложений и доступа к Lokker.</div>
+      <div class="text-input-group">
+        <label>Пароль</label>
+        <input type="password" class="text-input" placeholder="Введите PIN или пароль" id="setup-pw">
+      </div>
+      <div class="text-input-group">
+        <label>Подтвердите пароль</label>
+        <input type="password" class="text-input" placeholder="Повторите пароль" id="setup-pw2">
+      </div>
+      <div class="setup-bottom">
+        <button class="primary-btn" onclick="finishSetup()">Продолжить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: MAIN (empty) ===================== -->
+  <div class="screen" id="screen-main-empty">
+    <div class="toolbar">
+      <span class="title">Lokker</span>
+      <button class="action-btn" onclick="goTo('screen-settings')">
+        <span class="material-symbols-outlined">settings</span>
+      </button>
+    </div>
+    <div class="empty-state">
+      <span class="material-symbols-outlined">visibility_off</span>
+      <p>Нет скрытых приложений.<br>Нажмите <b>+</b>, чтобы скрыть приложение.</p>
+    </div>
+    <button class="fab" onclick="openPicker()">
+      <span class="material-symbols-outlined">add</span>
+    </button>
+  </div>
+
+  <!-- ===================== SCREEN: MAIN (with apps) ===================== -->
+  <div class="screen" id="screen-main">
+    <div class="toolbar">
+      <span class="title">Lokker</span>
+      <button class="action-btn" onclick="goTo('screen-settings')">
+        <span class="material-symbols-outlined">settings</span>
+      </button>
+    </div>
+    <div class="search-bar">
+      <span class="material-symbols-outlined">search</span>
+      <input type="text" placeholder="Фильтр приложений..." id="main-search" oninput="filterMainList()">
+    </div>
+    <div class="app-list" id="hidden-apps-list">
+      <!-- Filled by JS -->
+    </div>
+    <button class="fab" onclick="openPicker()">
+      <span class="material-symbols-outlined">add</span>
+    </button>
+  </div>
+
+  <!-- ===================== SCREEN: APP PICKER ===================== -->
+  <div class="screen" id="screen-picker">
+    <div class="toolbar">
+      <button class="back-btn" onclick="closePicker()">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <span class="title">Скрыть приложения</span>
+    </div>
+    <div class="search-bar">
+      <span class="material-symbols-outlined">search</span>
+      <input type="text" placeholder="Поиск приложений..." id="picker-search" oninput="filterPickerList()">
+    </div>
+    <div class="picker-toggle" onclick="toggleSystemApps()">
+      <div class="mini-switch" id="sys-switch">
+        <div class="knob"></div>
+      </div>
+      <span>Показать системные приложения</span>
+    </div>
+    <div class="app-list" id="picker-apps-list">
+      <!-- Filled by JS -->
+    </div>
+    <div class="bottom-bar">
+      <button class="primary-btn" id="picker-btn" disabled onclick="hideSelected()">Выберите приложения</button>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: SETTINGS ===================== -->
+  <div class="screen" id="screen-settings">
+    <div class="toolbar">
+      <button class="back-btn" onclick="goToMain()">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <span class="title">Настройки</span>
+    </div>
+    <div class="app-list">
+      <div class="section-header">Безопасность</div>
+
+      <div class="toggle-row" onclick="toggleSelfHide()">
+        <span class="material-symbols-outlined" style="color:#888">visibility_off</span>
+        <div class="toggle-info">
+          <div class="toggle-label">Скрыть Lokker из лаунчера</div>
+          <div class="toggle-desc">Доступ только через горячую клавишу</div>
+        </div>
+        <div class="toggle-switch" id="self-hide-toggle">
+          <div class="knob"></div>
+        </div>
+      </div>
+
+      <div class="settings-item" onclick="goTo('screen-change-pw')">
+        <span class="material-symbols-outlined">lock</span>
+        <div class="settings-info">
+          <div class="settings-label">Сменить пароль</div>
+          <div class="settings-desc">Изменить PIN или пароль</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+
+      <div class="toggle-row" onclick="toggleBiometric()">
+        <span class="material-symbols-outlined" style="color:#888">fingerprint</span>
+        <div class="toggle-info">
+          <div class="toggle-label">Биометрия</div>
+          <div class="toggle-desc">Отпечаток пальца или Face Unlock</div>
+        </div>
+        <div class="toggle-switch on" id="bio-toggle">
+          <div class="knob"></div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-header">Горячие клавиши</div>
+
+      <div class="settings-item" onclick="goTo('screen-hotkey')">
+        <span class="material-symbols-outlined">keyboard</span>
+        <div class="settings-info">
+          <div class="settings-label">Настройка горячих клавиш</div>
+          <div class="settings-desc">Громкость↑ Громкость↑ Громкость↓</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-header">Управление</div>
+
+      <div class="settings-item" id="unhide-all-btn" onclick="unhideAllApps()">
+        <span class="material-symbols-outlined">visibility</span>
+        <div class="settings-info">
+          <div class="settings-label" id="unhide-all-label">Раскрыть все приложения</div>
+          <div class="settings-desc" id="unhide-all-desc">Временно показать все скрытые приложения</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="about-section">
+        <div><b>Lokker</b></div>
+        <div class="version">v1.0.0 · com.lokker.app</div>
+        <div style="margin-top:4px">LineageOS 22 · Android 15</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: CHANGE PASSWORD ===================== -->
+  <div class="screen" id="screen-change-pw">
+    <div class="toolbar">
+      <button class="back-btn" onclick="goTo('screen-settings')">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <span class="title">Сменить пароль</span>
+    </div>
+    <div class="setup-container">
+      <div class="text-input-group">
+        <label>Текущий пароль</label>
+        <input type="password" class="text-input" placeholder="Введите текущий пароль">
+      </div>
+      <div class="text-input-group">
+        <label>Новый пароль</label>
+        <input type="password" class="text-input" placeholder="Введите новый пароль">
+      </div>
+      <div class="text-input-group">
+        <label>Подтвердите новый пароль</label>
+        <input type="password" class="text-input" placeholder="Повторите новый пароль">
+      </div>
+      <div class="setup-bottom">
+        <button class="primary-btn" onclick="goTo('screen-settings'); showSnack('Пароль успешно изменён')">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SCREEN: HOTKEY SETUP ===================== -->
+  <div class="screen" id="screen-hotkey">
+    <div class="toolbar">
+      <button class="back-btn" onclick="goTo('screen-settings')">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <span class="title">Горячие клавиши</span>
+    </div>
+    <div class="app-list">
+      <div class="section-header">Открытие Lokker</div>
+
+      <div class="hotkey-recorder" onclick="startRecording('lokker')">
+        <div class="hotkey-sequence" id="lokker-hotkey">
+          <span class="key-badge active">Vol ↑</span>
+          <span class="key-badge active">Vol ↑</span>
+          <span class="key-badge active">Vol ↓</span>
+        </div>
+        <div class="recording-indicator" id="rec-indicator" style="display:none">
+          <div class="recording-dot"></div>
+          <span>Нажимайте клавиши...</span>
+        </div>
+        <div style="font-size:13px;color:#777;text-align:center">
+          Нажмите для записи новой последовательности
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-header">Горячие клавиши приложений</div>
+
+      <div class="settings-item" id="app-hotkey-wa">
+        <span class="material-symbols-outlined">keyboard</span>
+        <div class="settings-info">
+          <div class="settings-label">WhatsApp</div>
+          <div class="settings-desc">Не назначена</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+
+      <div class="settings-item" id="app-hotkey-signal">
+        <span class="material-symbols-outlined">keyboard</span>
+        <div class="settings-info">
+          <div class="settings-label">Signal</div>
+          <div class="settings-desc">Vol ↓ Vol ↓ Vol ↑</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+
+      <div class="settings-item" id="app-hotkey-tg">
+        <span class="material-symbols-outlined">keyboard</span>
+        <div class="settings-info">
+          <div class="settings-label">Telegram</div>
+          <div class="settings-desc">Не назначена</div>
+        </div>
+        <span class="material-symbols-outlined" style="color:#555;font-size:20px">chevron_right</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== CONTEXT MENU ===================== -->
+  <div class="context-menu" id="context-menu">
+    <div class="context-menu-item" onclick="contextAction('hotkey')">
+      <span class="material-symbols-outlined">keyboard</span>
+      Назначить горячую клавишу
+    </div>
+    <div class="context-menu-item" onclick="contextAction('unhide')">
+      <span class="material-symbols-outlined">visibility</span>
+      Раскрыть
+    </div>
+    <div class="context-menu-item" onclick="contextAction('remove')">
+      <span class="material-symbols-outlined">delete</span>
+      Удалить из Lokker
+    </div>
+  </div>
+
+  <!-- ===================== CONFIRM DIALOG ===================== -->
+  <div class="confirm-overlay" id="confirm-overlay">
+    <div class="confirm-dialog">
+      <h3 id="confirm-title">Подтверждение</h3>
+      <p id="confirm-text">Вы уверены?</p>
+      <div class="confirm-actions">
+        <button class="btn-cancel" onclick="closeConfirm()">Отмена</button>
+        <button class="btn-confirm" id="confirm-action" onclick="closeConfirm()">Подтвердить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SNACKBAR ===================== -->
+  <div class="snackbar" id="snackbar"></div>
+
+  <!-- Nav bar -->
+  <div class="nav-bar">
+    <div class="handle"></div>
+  </div>
+</div>
+
+<script>
+// ======================== DATA ========================
+const allApps = [
+  { name: 'WhatsApp', pkg: 'com.whatsapp', color: '#25D366', letter: 'W', system: false },
+  { name: 'Signal', pkg: 'org.thoughtcrime.securesms', color: '#3A76F0', letter: 'S', system: false },
+  { name: 'Telegram', pkg: 'org.telegram.messenger', color: '#0088CC', letter: 'T', system: false },
+  { name: 'Chrome', pkg: 'com.android.chrome', color: '#4285F4', letter: 'C', system: false },
+  { name: 'YouTube', pkg: 'com.google.android.youtube', color: '#FF0000', letter: 'Y', system: false },
+  { name: 'Instagram', pkg: 'com.instagram.android', color: '#E4405F', letter: 'I', system: false },
+  { name: 'Twitter/X', pkg: 'com.twitter.android', color: '#1DA1F2', letter: 'X', system: false },
+  { name: 'Gmail', pkg: 'com.google.android.gm', color: '#EA4335', letter: 'G', system: false },
+  { name: 'Калькулятор', pkg: 'com.android.calculator2', color: '#607D8B', letter: 'К', system: true },
+  { name: 'Камера', pkg: 'com.android.camera2', color: '#455A64', letter: 'К', system: true },
+  { name: 'Календарь', pkg: 'com.google.android.calendar', color: '#4285F4', letter: 'К', system: false },
+  { name: 'Контакты', pkg: 'com.android.contacts', color: '#4285F4', letter: 'К', system: true },
+  { name: 'Файлы', pkg: 'com.google.android.documentsui', color: '#4285F4', letter: 'Ф', system: true },
+  { name: 'Настройки', pkg: 'com.android.settings', color: '#607D8B', letter: 'Н', system: true },
+];
+
+let hiddenApps = [];
+let pickerSelected = new Set();
+let showSystemApps = false;
+let pinValue = '';
+let contextApp = null;
+
+// ======================== NAVIGATION ========================
+function goTo(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+  closeContextMenu();
+}
+
+function goToMain() {
+  if (hiddenApps.length > 0) {
+    goTo('screen-main');
+    renderHiddenApps();
+  } else {
+    goTo('screen-main-empty');
+  }
+}
+
+// ======================== AUTH ========================
+function pinPress(digit) {
+  if (pinValue.length >= 4) return;
+  pinValue += digit;
+  updatePinDots();
+  if (pinValue.length === 4) {
+    setTimeout(() => {
+      pinValue = '';
+      updatePinDots();
+      // First time → setup; otherwise → main
+      if (hiddenApps.length > 0) {
+        goTo('screen-main');
+        renderHiddenApps();
+      } else {
+        goTo('screen-main-empty');
+      }
+    }, 300);
+  }
+}
+
+function pinDelete() {
+  pinValue = pinValue.slice(0, -1);
+  updatePinDots();
+}
+
+function updatePinDots() {
+  document.querySelectorAll('#pin-dots .pin-dot').forEach((dot, i) => {
+    dot.classList.toggle('filled', i < pinValue.length);
+  });
+}
+
+function biometricAuth() {
+  showSnack('Биометрия подтверждена');
+  setTimeout(() => {
+    if (hiddenApps.length > 0) {
+      goTo('screen-main');
+      renderHiddenApps();
+    } else {
+      goTo('screen-main-empty');
+    }
+  }, 600);
+}
+
+function finishSetup() {
+  goTo('screen-main-empty');
+  showSnack('Пароль установлен');
+}
+
+// ======================== HIDDEN APPS LIST ========================
+function renderHiddenApps() {
+  const list = document.getElementById('hidden-apps-list');
+  const query = (document.getElementById('main-search')?.value || '').toLowerCase();
+
+  const filtered = hiddenApps.filter(a =>
+    a.name.toLowerCase().includes(query) || a.pkg.toLowerCase().includes(query)
+  );
+
+  list.innerHTML = filtered.map(app => `
+    <div class="app-item" onclick="launchApp('${app.pkg}')"
+         oncontextmenu="event.preventDefault(); showContextMenu(event, '${app.pkg}')">
+      <div class="app-icon" style="background:${app.color}">${app.letter}</div>
+      <div class="app-info">
+        <div class="name">${app.name}</div>
+        <div class="package">${app.pkg}</div>
+      </div>
+      <button class="app-action-btn" onclick="event.stopPropagation(); unhideApp('${app.pkg}')" title="Раскрыть">
+        <span class="material-symbols-outlined">visibility</span>
+      </button>
+    </div>
+  `).join('');
+}
+
+function filterMainList() { renderHiddenApps(); }
+
+function launchApp(pkg) {
+  const app = hiddenApps.find(a => a.pkg === pkg);
+  showSnack(`Запуск ${app?.name}... (аутентификация → раскрытие → запуск)`);
+}
+
+function unhideApp(pkg) {
+  showConfirm(
+    'Раскрыть приложение?',
+    'Приложение снова появится в лаунчере, но останется под защитой Lokker.',
+    () => {
+      const app = hiddenApps.find(a => a.pkg === pkg);
+      hiddenApps = hiddenApps.filter(a => a.pkg !== pkg);
+      goToMain();
+      showSnack(`${app?.name} раскрыто`);
+    }
+  );
+}
+
+// ======================== APP PICKER ========================
+function openPicker() {
+  pickerSelected.clear();
+  goTo('screen-picker');
+  renderPickerApps();
+  updatePickerBtn();
+}
+
+function closePicker() {
+  goToMain();
+}
+
+function renderPickerApps() {
+  const list = document.getElementById('picker-apps-list');
+  const query = (document.getElementById('picker-search')?.value || '').toLowerCase();
+
+  let apps = allApps.filter(a => showSystemApps || !a.system);
+  if (query) {
+    apps = apps.filter(a =>
+      a.name.toLowerCase().includes(query) || a.pkg.toLowerCase().includes(query)
+    );
+  }
+
+  list.innerHTML = apps.map(app => {
+    const isHidden = hiddenApps.some(h => h.pkg === app.pkg);
+    const isSelected = pickerSelected.has(app.pkg);
+
+    if (isHidden) {
+      return `
+        <div class="app-item" style="opacity:0.5;cursor:default">
+          <div class="checkbox disabled"></div>
+          <div class="app-icon" style="background:${app.color}">${app.letter}</div>
+          <div class="app-info">
+            <div class="name">${app.name}</div>
+            <div class="package">${app.pkg}</div>
+          </div>
+          <span class="hidden-label">Скрыто</span>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="app-item" onclick="togglePickerApp('${app.pkg}')">
+        <div class="checkbox ${isSelected ? 'checked' : ''}"></div>
+        <div class="app-icon" style="background:${app.color}">${app.letter}</div>
+        <div class="app-info">
+          <div class="name">${app.name}</div>
+          <div class="package">${app.pkg}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function togglePickerApp(pkg) {
+  if (pickerSelected.has(pkg)) pickerSelected.delete(pkg);
+  else pickerSelected.add(pkg);
+  renderPickerApps();
+  updatePickerBtn();
+}
+
+function updatePickerBtn() {
+  const btn = document.getElementById('picker-btn');
+  const n = pickerSelected.size;
+  if (n === 0) {
+    btn.disabled = true;
+    btn.textContent = 'Выберите приложения';
+  } else {
+    btn.disabled = false;
+    const word = n === 1 ? 'приложение' : (n < 5 ? 'приложения' : 'приложений');
+    btn.textContent = `Скрыть ${n} ${word}`;
+  }
+}
+
+function filterPickerList() { renderPickerApps(); }
+
+function toggleSystemApps() {
+  showSystemApps = !showSystemApps;
+  document.getElementById('sys-switch').classList.toggle('on', showSystemApps);
+  renderPickerApps();
+}
+
+function hideSelected() {
+  const newHidden = allApps.filter(a => pickerSelected.has(a.pkg));
+  hiddenApps.push(...newHidden);
+  const n = newHidden.length;
+  const word = n === 1 ? 'приложение скрыто' : (n < 5 ? 'приложения скрыты' : 'приложений скрыто');
+  showSnack(`${n} ${word}`);
+  pickerSelected.clear();
+  goTo('screen-main');
+  renderHiddenApps();
+}
+
+// ======================== CONTEXT MENU ========================
+function showContextMenu(event, pkg) {
+  contextApp = pkg;
+  const menu = document.getElementById('context-menu');
+  const rect = event.target.closest('.app-item').getBoundingClientRect();
+  const phoneRect = document.getElementById('phone').getBoundingClientRect();
+
+  menu.style.top = (rect.top - phoneRect.top + 20) + 'px';
+  menu.style.left = '60px';
+  menu.classList.add('active');
+
+  setTimeout(() => {
+    document.addEventListener('click', closeContextMenu, { once: true });
+  }, 10);
+}
+
+function closeContextMenu() {
+  document.getElementById('context-menu').classList.remove('active');
+}
+
+function contextAction(action) {
+  closeContextMenu();
+  const app = hiddenApps.find(a => a.pkg === contextApp);
+  if (!app) return;
+
+  if (action === 'hotkey') {
+    goTo('screen-hotkey');
+  } else if (action === 'unhide') {
+    unhideApp(contextApp);
+  } else if (action === 'remove') {
+    showConfirm(
+      'Удалить из Lokker?',
+      `${app.name} будет раскрыто и удалено из управления Lokker.`,
+      () => {
+        hiddenApps = hiddenApps.filter(a => a.pkg !== contextApp);
+        goToMain();
+        showSnack(`${app.name} удалено из Lokker`);
+      }
+    );
+  }
+}
+
+// ======================== SETTINGS ========================
+function toggleSelfHide() {
+  const toggle = document.getElementById('self-hide-toggle');
+  const isOn = toggle.classList.contains('on');
+
+  if (!isOn) {
+    showConfirm(
+      'Скрыть Lokker?',
+      'Lokker будет скрыт из лаунчера. Вы сможете открыть его только горячей клавишей (Громкость↑ Громкость↑ Громкость↓). Продолжить?',
+      () => {
+        toggle.classList.add('on');
+        showSnack('Lokker скрыт из лаунчера');
+      }
+    );
+  } else {
+    toggle.classList.remove('on');
+    showSnack('Lokker виден в лаунчере');
+  }
+}
+
+function toggleBiometric() {
+  const toggle = document.getElementById('bio-toggle');
+  toggle.classList.toggle('on');
+}
+
+function unhideAllApps() {
+  const label = document.getElementById('unhide-all-label');
+  const desc = document.getElementById('unhide-all-desc');
+
+  if (label.textContent === 'Раскрыть все приложения') {
+    if (hiddenApps.length === 0) {
+      showSnack('Нет скрытых приложений');
+      return;
+    }
+    showConfirm(
+      'Раскрыть все?',
+      `Это раскроет все ${hiddenApps.length} скрытых приложений. Закреплённые ярлыки сохранятся.`,
+      () => {
+        label.textContent = 'Скрыть все приложения';
+        desc.textContent = 'Повторно скрыть ранее раскрытые приложения';
+        showSnack('Все приложения раскрыты');
+      }
+    );
+  } else {
+    showConfirm(
+      'Скрыть все?',
+      `Повторно скрыть все ранее скрытых приложений?`,
+      () => {
+        label.textContent = 'Раскрыть все приложения';
+        desc.textContent = 'Временно показать все скрытые приложения';
+        showSnack('Все приложения скрыты');
+      }
+    );
+  }
+}
+
+// ======================== HOTKEY ========================
+let recording = false;
+function startRecording(target) {
+  const indicator = document.getElementById('rec-indicator');
+  if (!recording) {
+    recording = true;
+    indicator.style.display = 'flex';
+    setTimeout(() => {
+      recording = false;
+      indicator.style.display = 'none';
+      showSnack('Горячая клавиша сохранена');
+    }, 3000);
+  }
+}
+
+// ======================== CONFIRM DIALOG ========================
+let confirmCallback = null;
+
+function showConfirm(title, text, callback) {
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-text').textContent = text;
+  confirmCallback = callback;
+  document.getElementById('confirm-overlay').classList.add('active');
+
+  document.getElementById('confirm-action').onclick = () => {
+    closeConfirm();
+    if (confirmCallback) confirmCallback();
+  };
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-overlay').classList.remove('active');
+}
+
+// ======================== SNACKBAR ========================
+let snackTimer = null;
+function showSnack(msg) {
+  const snack = document.getElementById('snackbar');
+  snack.textContent = msg;
+  snack.classList.add('active');
+  if (snackTimer) clearTimeout(snackTimer);
+  snackTimer = setTimeout(() => snack.classList.remove('active'), 2500);
+}
+
+// ======================== INIT ========================
+// Pre-populate with some hidden apps for demo
+hiddenApps = [
+  allApps[0], // WhatsApp
+  allApps[1], // Signal
+  allApps[2], // Telegram
+];
+
+// Start at auth screen
+goTo('screen-auth');
+</script>
+
+</body>
+</html>
