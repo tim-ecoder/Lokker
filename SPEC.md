@@ -526,7 +526,8 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 - **Self-hide toggle** — hide/show Lokker in the launcher. When enabled, Lokker icon disappears; only accessible via hotkey. Shows confirmation dialog: "Lokker will be hidden from the launcher. You can only open it with the hotkey (Vol↑ Vol↑ Vol↓). Continue?"
 - **Change password** — re-enter current, set new
 - **Hotkey configuration** — opens `HotkeySetupActivity` (must be configured before self-hide can be enabled)
-- **Unhide all apps** — danger button that unhides every hidden app at once. Shows confirmation dialog: "This will unhide all N hidden apps and remove their pinned shortcuts. This cannot be undone. Continue?" Calls `unhideAll()`.
+- **Unhide all apps** — danger button that unhides every hidden app at once. Shows confirmation dialog: "This will unhide all N hidden apps and remove their pinned shortcuts. This cannot be undone. Continue?" Calls `unhideAll()`. Only visible when there are hidden apps.
+- **Re-hide all apps** — appears only after `unhideAll()` was used and the previous hidden list is still cached. Shows confirmation dialog: "Re-hide all N previously hidden apps?" Calls `rehideAll()`. Disappears once used or if the user manually modifies the hidden list.
 - **Biometric toggle** — enable/disable biometric auth
 - **About** — version info
 
@@ -692,13 +693,16 @@ public void unhideAll() {
     List<HiddenApp> allApps = db.hiddenAppDao().getAllSync();
     if (allApps.isEmpty()) return;
 
+    // Snapshot the list so we can re-hide later
+    saveUnhideAllSnapshot(allApps);
+
     ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
     List<String> shortcutIds = new ArrayList<>();
 
     for (HiddenApp app : allApps) {
         pm.setApplicationHiddenSetting(app.packageName, false);
         shortcutIds.add("lokker_" + app.packageName);
-        new File(ctx.getFilesDir(), "icons/" + app.packageName + ".png").delete();
+        // Keep cached icons — needed if user re-hides
     }
 
     // Bulk cleanup
@@ -709,6 +713,69 @@ public void unhideAll() {
     if (!shortcutIds.isEmpty()) {
         sm.disableShortcuts(shortcutIds);
     }
+}
+
+/**
+ * Re-hide all apps from the last unhideAll() snapshot.
+ * Only available while the snapshot exists.
+ */
+public void rehideAll() {
+    List<HiddenApp> snapshot = loadUnhideAllSnapshot();
+    if (snapshot == null || snapshot.isEmpty()) return;
+
+    for (HiddenApp app : snapshot) {
+        // Verify app is still installed before re-hiding
+        try {
+            pm.getPackageInfo(app.packageName, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            continue; // app was uninstalled, skip
+        }
+
+        pm.setApplicationHiddenSetting(app.packageName, true);
+        db.hiddenAppDao().insert(app);
+    }
+
+    clearUnhideAllSnapshot();
+}
+
+// --- Snapshot persistence (EncryptedSharedPreferences) ---
+
+private void saveUnhideAllSnapshot(List<HiddenApp> apps) {
+    JSONArray arr = new JSONArray();
+    for (HiddenApp app : apps) {
+        JSONObject obj = new JSONObject();
+        obj.put("packageName", app.packageName);
+        obj.put("appLabel", app.appLabel);
+        obj.put("hiddenAt", app.hiddenAt);
+        arr.put(obj);
+    }
+    prefs.edit().putString("unhide_all_snapshot", arr.toString()).apply();
+}
+
+private List<HiddenApp> loadUnhideAllSnapshot() {
+    String json = prefs.getString("unhide_all_snapshot", null);
+    if (json == null) return null;
+
+    List<HiddenApp> result = new ArrayList<>();
+    JSONArray arr = new JSONArray(json);
+    for (int i = 0; i < arr.length(); i++) {
+        JSONObject obj = arr.getJSONObject(i);
+        result.add(new HiddenApp(
+            obj.getString("packageName"),
+            obj.getString("appLabel"),
+            null,  // hotkey not preserved in snapshot
+            obj.getLong("hiddenAt")
+        ));
+    }
+    return result;
+}
+
+private void clearUnhideAllSnapshot() {
+    prefs.edit().remove("unhide_all_snapshot").apply();
+}
+
+public boolean hasUnhideAllSnapshot() {
+    return prefs.getString("unhide_all_snapshot", null) != null;
 }
 ```
 
@@ -910,6 +977,7 @@ public class LokkerPrefs {
     // "fail_count"       — int (auth failure counter)
     // "lockout_until"    — long (timestamp)
     // "pending_rehide"    — StringSet (packages temporarily unhidden)
+    // "unhide_all_snapshot" — JSON array of previously hidden apps (for re-hide all)
     // NOTE: "notif_auto_granted" removed — NLS no longer needed
 }
 ```
@@ -1062,7 +1130,8 @@ packages/apps/Lokker/
 | User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
 | Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
 | User unhides app permanently | Pinned shortcut disabled, icon cache cleaned | `ShortcutManager.disableShortcuts()` + file delete |
-| User taps "Unhide all apps" in settings | All hidden apps restored, list cleared, shortcuts removed | `unhideAll()` — loops all hidden apps, bulk unhide + `deleteAll()` + clear `pendingRehide` |
+| User taps "Unhide all apps" in settings | All hidden apps restored, list cleared, shortcuts disabled; snapshot saved | `unhideAll()` — snapshots list to prefs, bulk unhide + `deleteAll()` + clear `pendingRehide` |
+| User taps "Re-hide all apps" in settings | All previously hidden apps re-hidden from snapshot | `rehideAll()` — reads snapshot, re-hides each (skips uninstalled), re-inserts to Room, clears snapshot |
 
 ---
 
