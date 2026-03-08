@@ -526,6 +526,7 @@ Triggered by the FAB. Full-screen dialog or bottom sheet:
 - **Self-hide toggle** — hide/show Lokker in the launcher. When enabled, Lokker icon disappears; only accessible via hotkey. Shows confirmation dialog: "Lokker will be hidden from the launcher. You can only open it with the hotkey (Vol↑ Vol↑ Vol↓). Continue?"
 - **Change password** — re-enter current, set new
 - **Hotkey configuration** — opens `HotkeySetupActivity` (must be configured before self-hide can be enabled)
+- **Unhide all apps** — danger button that unhides every hidden app at once. Shows confirmation dialog: "This will unhide all N hidden apps and remove their pinned shortcuts. This cannot be undone. Continue?" Calls `unhideAll()`.
 - **Biometric toggle** — enable/disable biometric auth
 - **About** — version info
 
@@ -685,6 +686,29 @@ public void unhideApp(String packageName) {
 
     // Clean up cached icon
     new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
+}
+
+public void unhideAll() {
+    List<HiddenApp> allApps = db.hiddenAppDao().getAllSync();
+    if (allApps.isEmpty()) return;
+
+    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
+    List<String> shortcutIds = new ArrayList<>();
+
+    for (HiddenApp app : allApps) {
+        pm.setApplicationHiddenSetting(app.packageName, false);
+        shortcutIds.add("lokker_" + app.packageName);
+        new File(ctx.getFilesDir(), "icons/" + app.packageName + ".png").delete();
+    }
+
+    // Bulk cleanup
+    db.hiddenAppDao().deleteAll();
+    pendingRehide.clear();
+    persistPendingRehide();
+
+    if (!shortcutIds.isEmpty()) {
+        sm.disableShortcuts(shortcutIds);
+    }
 }
 ```
 
@@ -847,6 +871,12 @@ public interface HiddenAppDao {
 
     @Query("DELETE FROM hidden_apps WHERE packageName = :pkg")
     void delete(String pkg);
+
+    @Query("SELECT * FROM hidden_apps")
+    List<HiddenApp> getAllSync();
+
+    @Query("DELETE FROM hidden_apps")
+    void deleteAll();
 }
 ```
 
@@ -1032,6 +1062,7 @@ packages/apps/Lokker/
 | User taps pinned shortcut | Auth → unhide → launch → rehide on switch | Shortcut intent → `AuthActivity` → standard launch flow |
 | Key remapper triggers shortcut | Same as tapping shortcut — auth → launch → rehide | Remapper targets `com.lokker.app.LAUNCH_HIDDEN` intent |
 | User unhides app permanently | Pinned shortcut disabled, icon cache cleaned | `ShortcutManager.disableShortcuts()` + file delete |
+| User taps "Unhide all apps" in settings | All hidden apps restored, list cleared, shortcuts removed | `unhideAll()` — loops all hidden apps, bulk unhide + `deleteAll()` + clear `pendingRehide` |
 
 ---
 
