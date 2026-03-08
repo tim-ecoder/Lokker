@@ -1162,15 +1162,14 @@ function renderHiddenApps() {
   );
 
   list.innerHTML = filtered.map(app => `
-    <div class="app-item" onclick="launchApp('${app.pkg}')"
-         oncontextmenu="event.preventDefault(); showContextMenu(event, '${app.pkg}')">
+    <div class="app-item" onclick="launchApp('${app.pkg}')">
       <div class="app-icon" style="background:${app.color}">${app.letter}</div>
       <div class="app-info">
         <div class="name">${app.name}</div>
         <div class="package">${app.pkg}</div>
       </div>
-      <button class="app-action-btn" onclick="event.stopPropagation(); unhideApp('${app.pkg}')" title="Раскрыть">
-        <span class="material-symbols-outlined">visibility</span>
+      <button class="app-action-btn" onclick="event.stopPropagation(); showContextMenu(event, '${app.pkg}')" title="Ещё">
+        <span class="material-symbols-outlined">more_vert</span>
       </button>
     </div>
   `).join('');
@@ -1293,11 +1292,13 @@ function hideSelected() {
 function showContextMenu(event, pkg) {
   contextApp = pkg;
   const menu = document.getElementById('context-menu');
-  const rect = event.target.closest('.app-item').getBoundingClientRect();
+  const btn = event.target.closest('.app-action-btn') || event.target;
   const phoneRect = document.getElementById('phone').getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
 
-  menu.style.top = (rect.top - phoneRect.top + 20) + 'px';
-  menu.style.left = '60px';
+  menu.style.top = (btnRect.bottom - phoneRect.top) + 'px';
+  menu.style.right = '16px';
+  menu.style.left = 'auto';
   menu.classList.add('active');
 
   setTimeout(() => {
