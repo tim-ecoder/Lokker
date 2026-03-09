@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#BB86FC</color>
+    <color name="colorPrimaryDark">#6200EA</color>
+    <color name="colorAccent">#BB86FC</color>
+    <color name="colorSurface">#121212</color>
+    <color name="colorSurfaceVariant">#1E1E1E</color>
+    <color name="colorOnSurface">#E0E0E0</color>
+    <color name="colorOnSurfaceMedium">#888888</color>
+    <color name="colorOnSurfaceDim">#666666</color>
+    <color name="colorError">#CF6679</color>
+    <color name="colorCardBg">#2A2A2A</color>
+    <color name="colorDivider">#2A2A2A</color>
+</resources>

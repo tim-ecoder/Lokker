@@ -921,6 +921,25 @@ body {
       </div>
 
       <div class="divider"></div>
+      <div class="section-header">Данные</div>
+
+      <div class="settings-item" onclick="exportSettings()">
+        <span class="material-symbols-outlined">upload_file</span>
+        <div class="settings-info">
+          <div class="settings-label">Экспорт настроек</div>
+          <div class="settings-desc">Сохранить конфигурацию в файл</div>
+        </div>
+      </div>
+
+      <div class="settings-item" onclick="importSettings()">
+        <span class="material-symbols-outlined">download</span>
+        <div class="settings-info">
+          <div class="settings-label">Импорт настроек</div>
+          <div class="settings-desc">Загрузить конфигурацию из файла</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
       <div class="section-header">О приложении</div>
 
       <div class="about-section">
@@ -1607,6 +1626,80 @@ function renderHotkeyAppList() {
       </div>
     `;
   }).join('');
+}
+
+// ======================== IMPORT/EXPORT ========================
+function exportSettings() {
+  const data = {
+    version: 1,
+    apps: hiddenApps.map(a => ({
+      packageName: a.pkg,
+      appLabel: a.name,
+      hidden: true,
+      hotkey: appHotkeys[a.pkg] || null
+    })),
+    lokkerHotkey: 'Vol ↑ Vol ↑ Vol ↓',
+    selfHidden: document.getElementById('self-hide-toggle').classList.contains('on'),
+    biometricEnabled: document.getElementById('bio-toggle').classList.contains('on')
+  };
+  // В реальном приложении — ACTION_CREATE_DOCUMENT; в mockup — скачивание
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'lokker-settings.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showSnack('Настройки экспортированы');
+}
+
+function importSettings() {
+  showConfirm(
+    'Импорт настроек?',
+    'Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?',
+    () => {
+      // В mockup — демонстрация через file input
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            if (!data.apps || !Array.isArray(data.apps)) throw new Error();
+            // Применяем импорт
+            hiddenApps = [];
+            appHotkeys = {};
+            const knownPkgs = allApps.map(a => a.pkg);
+            let count = 0;
+            for (const app of data.apps) {
+              const found = allApps.find(a => a.pkg === app.packageName);
+              if (found) {
+                hiddenApps.push(found);
+                if (app.hotkey) appHotkeys[app.packageName] = app.hotkey;
+                count++;
+              }
+            }
+            if (data.selfHidden !== undefined) {
+              document.getElementById('self-hide-toggle').classList.toggle('on', data.selfHidden);
+            }
+            if (data.biometricEnabled !== undefined) {
+              document.getElementById('bio-toggle').classList.toggle('on', data.biometricEnabled);
+            }
+            goToMain();
+            showSnack(`Настройки импортированы (${count} приложений)`);
+          } catch (err) {
+            showSnack('Ошибка импорта: неверный формат файла');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    }
+  );
 }
 
 // ======================== CONFIRM DIALOG ========================

@@ -1,0 +1,15 @@
+# Build outputs
+build/
+*.apk
+*.keystore
+
+# Gradle
+.gradle/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Stub JARs (compile-time only)
+libs/stubs.jar

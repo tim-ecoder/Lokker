@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/colorSurface">
+
+    <android.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="@color/colorSurfaceVariant"
+        android:title="@string/picker_title"/>
+
+    <!-- Search -->
+    <EditText
+        android:id="@+id/picker_search"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_margin="12dp"
+        android:background="@color/colorCardBg"
+        android:hint="@string/picker_search_hint"
+        android:textColorHint="@color/colorOnSurfaceDim"
+        android:textColor="@color/colorOnSurface"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:singleLine="true"
+        android:inputType="text"
+        android:drawableStart="@android:drawable/ic_menu_search"
+        android:drawablePadding="12dp"/>
+
+    <!-- System apps toggle -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <Switch
+            android:id="@+id/system_apps_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/picker_show_system"
+            android:textColor="@color/colorOnSurfaceMedium"
+            android:textSize="14sp"/>
+    </LinearLayout>
+
+    <!-- App list -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/picker_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <!-- Bottom button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/colorSurfaceVariant"
+        android:padding="12dp">
+
+        <Button
+            android:id="@+id/picker_btn"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="@string/picker_btn_empty"
+            android:enabled="false"
+            android:backgroundTint="@color/colorPrimary"
+            android:textColor="#000000"/>
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/ctx_hotkey"
+        android:icon="@android:drawable/ic_menu_manage"
+        android:title="@string/ctx_hotkey" />
+
+    <item
+        android:id="@+id/ctx_launch"
+        android:icon="@android:drawable/ic_media_play"
+        android:title="@string/ctx_launch" />
+
+    <item
+        android:id="@+id/ctx_remove"
+        android:icon="@android:drawable/ic_menu_delete"
+        android:title="@string/ctx_remove" />
+
+</menu>

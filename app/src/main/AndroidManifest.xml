@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.lokker.app"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33"/>
+
+    <!-- Runtime permissions -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission"/>
+
+    <!-- Privileged permissions (whitelisted in privapp XML when installed as system app) -->
+    <uses-permission android:name="android.permission.MANAGE_USERS"/>
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
+    <uses-permission android:name="android.permission.REMOVE_TASKS"/>
+    <uses-permission android:name="android.permission.GET_TASKS"/>
+    <uses-permission android:name="android.permission.REAL_GET_TASKS"/>
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS"/>
+
+    <application
+        android:name=".LokkerApp"
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <!-- Real activity — always exists, never disabled -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="com.lokker.app.OPEN"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Launcher alias — THIS is disabled when self-hiding -->
+        <activity-alias
+            android:name=".LokkerLauncher"
+            android:targetActivity=".ui.MainActivity"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Auth gate -->
+        <activity
+            android:name=".ui.AuthActivity"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.lokker.app.LAUNCH_HIDDEN"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Settings -->
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:excludeFromRecents="true"/>
+
+        <!-- Change/Set password -->
+        <activity
+            android:name=".ui.ChangePasswordActivity"
+            android:excludeFromRecents="true"/>
+
+        <!-- Hotkey setup -->
+        <activity
+            android:name=".ui.HotkeySetupActivity"
+            android:excludeFromRecents="true"/>
+
+        <!-- App picker -->
+        <activity
+            android:name=".ui.AppPickerDialog"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme"/>
+
+        <!-- Accessibility Service -->
+        <service
+            android:name=".service.LokkerAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config"/>
+        </service>
+
+        <!-- Boot receiver -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- Package monitor -->
+        <receiver
+            android:name=".receiver.PackageMonitor"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.PACKAGE_ADDED"/>
+                <data android:scheme="package"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- Screen on receiver (must be registered dynamically, not via manifest) -->
+        <!-- ScreenReceiver is registered in LokkerAccessibilityService.onServiceConnected() -->
+
+        <!-- Secret code receiver (*#5655#) -->
+        <receiver
+            android:name=".receiver.SecretCodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE"/>
+                <data android:scheme="android_secret_code" android:host="5655"/>
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

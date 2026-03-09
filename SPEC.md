@@ -610,6 +610,101 @@ public void showBiometric(FragmentActivity activity, Runnable onSuccess, Runnabl
   - Когда снимок существует (приложения только что раскрыты): показывает **"Скрыть все приложения"** с подписью "Повторно скрыть ранее раскрытые приложения". Подтверждение: "Повторно скрыть все ранее скрытых приложений?" Вызывает `rehideAll()`, который повторно скрывает из снимка.
   - Не показывается, когда нет скрытых приложений и нет снимка.
 
+#### Секция «Данные»
+
+- **Экспорт настроек** — сохраняет конфигурацию Lokker в JSON-файл через системный диалог `ACTION_CREATE_DOCUMENT`. Файл содержит: список управляемых приложений (packageName, appLabel, hidden, hotkeySequence), горячую клавишу Lokker, флаг самоскрытия, флаг биометрии. **Не** экспортирует хеш пароля (безопасность) и `pendingRehide` (транзиентное состояние). Подпись: "Сохранить конфигурацию в файл". При успехе — snackbar «Настройки экспортированы».
+- **Импорт настроек** — загружает конфигурацию из JSON-файла через `ACTION_OPEN_DOCUMENT`. Показывает диалог подтверждения: "Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?" При импорте: очищает текущий список → добавляет приложения из файла (пропускает отсутствующие пакеты) → применяет состояние скрытия → восстанавливает горячие клавиши. При успехе — snackbar «Настройки импортированы (N приложений)». При ошибке — snackbar «Ошибка импорта: неверный формат файла».
+
+```java
+// AppRepository.java
+
+public String exportSettings() {
+    JSONObject root = new JSONObject();
+
+    // Список приложений
+    JSONArray apps = new JSONArray();
+    for (LokkerApp app : db.lokkerAppDao().getAll()) {
+        JSONObject obj = new JSONObject();
+        obj.put("packageName", app.packageName);
+        obj.put("appLabel", app.appLabel);
+        obj.put("hidden", app.hidden);
+        if (app.hotkeySequence != null) {
+            obj.put("hotkey", new JSONArray(app.hotkeySequence));
+        }
+        apps.put(obj);
+    }
+    root.put("apps", apps);
+
+    // Горячая клавиша Lokker
+    HotkeyMap hk = db.hotkeyMapDao().get();
+    if (hk != null && hk.lokkerHotkey != null) {
+        root.put("lokkerHotkey", new JSONArray(hk.lokkerHotkey));
+    }
+
+    // Настройки
+    root.put("selfHidden", prefs.getBoolean("self_hidden", false));
+    root.put("biometricEnabled", prefs.getBoolean("biometric_enabled", true));
+    root.put("version", 1);
+
+    return root.toString(2);
+}
+
+public int importSettings(String json) {
+    JSONObject root = new JSONObject(json);
+    JSONArray apps = root.getJSONArray("apps");
+
+    // Очищаем текущие данные
+    for (LokkerApp existing : db.lokkerAppDao().getAll()) {
+        removeApplication(existing.packageName);
+    }
+
+    int imported = 0;
+    for (int i = 0; i < apps.length(); i++) {
+        JSONObject obj = apps.getJSONObject(i);
+        String pkg = obj.getString("packageName");
+
+        // Пропускаем отсутствующие пакеты
+        try {
+            pm.getPackageInfo(pkg, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            continue;
+        }
+
+        addApplication(pkg);
+        if (obj.optBoolean("hidden", false)) {
+            hideApp(pkg);
+        }
+
+        // Горячая клавиша приложения
+        if (obj.has("hotkey")) {
+            JSONArray hkArr = obj.getJSONArray("hotkey");
+            List<Integer> seq = new ArrayList<>();
+            for (int j = 0; j < hkArr.length(); j++) seq.add(hkArr.getInt(j));
+            db.lokkerAppDao().setHotkey(pkg, seq);
+        }
+        imported++;
+    }
+
+    // Горячая клавиша Lokker
+    if (root.has("lokkerHotkey")) {
+        JSONArray hkArr = root.getJSONArray("lokkerHotkey");
+        List<Integer> seq = new ArrayList<>();
+        for (int i = 0; i < hkArr.length(); i++) seq.add(hkArr.getInt(i));
+        HotkeyMap hk = new HotkeyMap();
+        hk.lokkerHotkey = seq;
+        db.hotkeyMapDao().insertOrUpdate(hk);
+    }
+
+    // Настройки
+    prefs.edit()
+        .putBoolean("self_hidden", root.optBoolean("selfHidden", false))
+        .putBoolean("biometric_enabled", root.optBoolean("biometricEnabled", true))
+        .apply();
+
+    return imported;
+}
+```
+
 #### Секция «О приложении» (заголовок секции + центрированный блок)
 
 - Центрированный текст: **Lokker**, версия `v1.0.0 · com.lokker.app`, платформа `LineageOS 22 · Android 15`
@@ -1291,6 +1386,9 @@ packages/apps/Lokker/
 | Пользователь нажимает ⋮ → «Удалить из Lokker» | Диалог подтверждения → приложение полностью удалено из управления Lokker | `removeApplication()` → раскрытие + удаление из Room + удаление ярлыка + очистка иконки |
 | Пользователь нажимает переключатель «Раскрыть все приложения» в настройках | Все скрытые приложения раскрыты, но остаются в Lokker; снимок сохранён; переключатель меняется на «Скрыть все приложения» | `unhideAll()` — сохраняет имена пакетов, устанавливает `hidden=false` для каждого, очищает `pendingRehide` |
 | Пользователь нажимает переключатель «Скрыть все приложения» в настройках | Все ранее раскрытые приложения повторно скрыты; переключатель возвращается к «Раскрыть все приложения» | `rehideAll()` — читает снимок, устанавливает `hidden=true` для каждого (пропускает удалённые/деинсталлированные), очищает снимок |
+| Пользователь экспортирует настройки | JSON-файл сохранён через системный диалог выбора файла | `exportSettings()` → `ACTION_CREATE_DOCUMENT` → запись JSON |
+| Пользователь импортирует настройки | Диалог подтверждения → текущие настройки заменены, отсутствующие пакеты пропущены | `importSettings()` → `ACTION_OPEN_DOCUMENT` → очистка → добавление + скрытие |
+| Импорт с отсутствующими приложениями | Отсутствующие пакеты пропускаются, остальные импортируются | `pm.getPackageInfo()` проверяет наличие перед добавлением |
 
 ---
 
