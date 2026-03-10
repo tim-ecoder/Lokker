@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lokker</string>
+
+    <!-- PIN Screen -->
+    <string name="pin_title">Lokker</string>
+    <string name="pin_subtitle">Введите PIN для продолжения</string>
+    <string name="wrong_pin">Неверный PIN</string>
+    <string name="lockout_msg">Повторите через %d сек.</string>
+    <string name="attempt_count">Неверный PIN (попытка %d/5)</string>
+
+    <!-- Biometric -->
+    <string name="biometric_title">Lokker</string>
+    <string name="biometric_subtitle">Аутентифицируйтесь для продолжения</string>
+    <string name="biometric_confirmed">Биометрия подтверждена</string>
+
+    <!-- Main Screen -->
+    <string name="main_search_hint">Фильтр приложений…</string>
+    <string name="empty_title">Нет скрытых приложений.</string>
+    <string name="empty_subtitle">Нажмите +, чтобы скрыть приложение.</string>
+
+    <!-- App Picker -->
+    <string name="picker_title">Скрыть приложения</string>
+    <string name="picker_search_hint">Поиск приложений…</string>
+    <string name="picker_show_system">Показать системные приложения</string>
+    <string name="picker_btn_empty">Выберите приложения</string>
+    <string name="picker_btn_format" formatted="false">Скрыть %d %s</string>
+
+    <string name="label_hidden">Скрыто</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Настройки</string>
+
+    <!-- Settings: Security -->
+    <string name="section_security">Безопасность</string>
+    <string name="self_hide_label">Скрыть Lokker из лаунчера</string>
+    <string name="self_hide_desc">Доступ только через горячую клавишу</string>
+    <string name="self_hide_confirm_title">Скрыть Lokker?</string>
+    <string name="self_hide_confirm_msg">Lokker будет скрыт из лаунчера. Вы сможете открыть его только горячей клавишей. Продолжить?</string>
+    <string name="set_password">Установить пароль</string>
+    <string name="change_password">Сменить пароль</string>
+    <string name="pw_not_set">Не установлен</string>
+    <string name="pw_change_desc">Изменить PIN или пароль</string>
+    <string name="biometric_label">Биометрия</string>
+    <string name="biometric_desc">Отпечаток пальца или Face Unlock</string>
+
+    <!-- Settings: Hotkeys -->
+    <string name="section_hotkeys">Горячие клавиши</string>
+    <string name="hotkey_setup_label">Настройка горячих клавиш</string>
+
+    <!-- Settings: Management -->
+    <string name="section_management">Управление</string>
+    <string name="unhide_all">Раскрыть все приложения</string>
+    <string name="unhide_all_desc">Временно показать все скрытые приложения</string>
+    <string name="hide_all">Скрыть все приложения</string>
+    <string name="hide_all_desc">Повторно скрыть ранее раскрытые приложения</string>
+
+    <!-- Settings: Data -->
+    <string name="section_data">Данные</string>
+    <string name="export_settings">Экспорт настроек</string>
+    <string name="export_desc">Сохранить конфигурацию в файл</string>
+    <string name="import_settings">Импорт настроек</string>
+    <string name="import_desc">Загрузить конфигурацию из файла</string>
+    <string name="import_confirm_title">Импорт настроек?</string>
+    <string name="import_confirm_msg">Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?</string>
+    <string name="export_success">Настройки экспортированы</string>
+    <string name="import_success">Настройки импортированы (%d приложений)</string>
+    <string name="import_error">Ошибка импорта: неверный формат файла</string>
+
+    <!-- Settings: About -->
+    <string name="section_about">О приложении</string>
+    <string name="about_platform">LineageOS 22 · Android 15</string>
+
+    <!-- Context Menu -->
+    <string name="ctx_hotkey">Назначить горячую клавишу</string>
+    <string name="ctx_launch">Запустить</string>
+    <string name="ctx_remove">Удалить из Lokker</string>
+
+    <!-- Remove Confirm -->
+    <string name="remove_confirm_title">Удалить из Lokker?</string>
+    <string name="remove_confirm_msg">%s будет раскрыто и удалено из управления Lokker.</string>
+    <string name="removed_msg">%s удалено из Lokker</string>
+    <string name="launching_msg">Запуск %s…</string>
+
+    <!-- Hotkeys -->
+    <string name="hotkey_saved">Горячая клавиша сохранена</string>
+    <string name="hotkey_app_saved">Горячая клавиша для %s сохранена</string>
+    <string name="hotkey_not_set">Не назначена</string>
+    <string name="hotkey_record_hint">Нажмите для записи новой последовательности</string>
+    <string name="hotkey_recording">Нажимайте клавиши…</string>
+    <string name="hotkey_conflict">Эта комбинация уже назначена: %s</string>
+    <string name="section_lokker_hotkey">Открытие Lokker</string>
+    <string name="section_app_hotkeys">Горячие клавиши приложений</string>
+    <string name="no_hidden_apps">Нет скрытых приложений</string>
+
+    <!-- Password -->
+    <string name="current_password">Текущий пароль</string>
+    <string name="new_password">Новый пароль</string>
+    <string name="confirm_password">Подтвердите пароль</string>
+    <string name="confirm_new_password">Подтвердите новый пароль</string>
+    <string name="pw_wrong_current">Неверный текущий пароль</string>
+    <string name="pw_too_short">Пароль должен содержать минимум 6 символов</string>
+    <string name="pw_mismatch">Пароли не совпадают</string>
+    <string name="pw_set_success">Пароль установлен</string>
+    <string name="pw_change_success">Пароль успешно изменён</string>
+
+    <!-- Self-hide -->
+    <string name="lokker_hidden">Lokker скрыт из лаунчера</string>
+    <string name="lokker_visible">Lokker виден в лаунчере</string>
+    <string name="hotkey_required">Сначала настройте горячую клавишу</string>
+
+    <!-- Unhide / Hide all -->
+    <string name="unhide_confirm_title">Раскрыть все?</string>
+    <string name="unhide_confirm_msg">Это раскроет все %d скрытых приложений. Закреплённые ярлыки сохранятся.</string>
+    <string name="hide_confirm_title">Скрыть все?</string>
+    <string name="hide_confirm_msg">Повторно скрыть все ранее раскрытые приложения?</string>
+    <string name="all_unhidden">Все приложения раскрыты</string>
+    <string name="all_hidden">Все приложения скрыты</string>
+    <string name="no_apps_to_unhide">Нет скрытых приложений</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_service_desc">Lokker использует этот сервис для отслеживания горячих клавиш и управления скрытыми приложениями.</string>
+    <string name="ctx_menu">Меню</string>
+    <string name="already_hidden">Скрыто</string>
+
+    <!-- Common -->
+    <string name="cancel">Отмена</string>
+    <string name="confirm">Подтвердить</string>
+    <string name="save">Сохранить</string>
+    <string name="reset">Сбросить</string>
+    <string name="apps_hidden_count" formatted="false">%d %s скрыто</string>
+</resources>

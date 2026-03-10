@@ -4,129 +4,129 @@
 
     <!-- PIN Screen -->
     <string name="pin_title">Lokker</string>
-    <string name="pin_subtitle">Введите PIN для продолжения</string>
-    <string name="wrong_pin">Неверный PIN</string>
-    <string name="lockout_msg">Повторите через %d сек.</string>
-    <string name="attempt_count">Неверный PIN (попытка %d/5)</string>
+    <string name="pin_subtitle">Enter PIN to continue</string>
+    <string name="wrong_pin">Wrong PIN</string>
+    <string name="lockout_msg">Try again in %d sec.</string>
+    <string name="attempt_count">Wrong PIN (attempt %d/5)</string>
 
     <!-- Biometric -->
     <string name="biometric_title">Lokker</string>
-    <string name="biometric_subtitle">Аутентифицируйтесь для продолжения</string>
-    <string name="biometric_confirmed">Биометрия подтверждена</string>
+    <string name="biometric_subtitle">Authenticate to continue</string>
+    <string name="biometric_confirmed">Biometric confirmed</string>
 
     <!-- Main Screen -->
-    <string name="main_search_hint">Фильтр приложений…</string>
-    <string name="empty_title">Нет скрытых приложений.</string>
-    <string name="empty_subtitle">Нажмите +, чтобы скрыть приложение.</string>
+    <string name="main_search_hint">Filter apps\u2026</string>
+    <string name="empty_title">No hidden apps.</string>
+    <string name="empty_subtitle">Tap + to hide an app.</string>
 
     <!-- App Picker -->
-    <string name="picker_title">Скрыть приложения</string>
-    <string name="picker_search_hint">Поиск приложений…</string>
-    <string name="picker_show_system">Показать системные приложения</string>
-    <string name="picker_btn_empty">Выберите приложения</string>
-    <string name="picker_btn_format" formatted="false">Скрыть %d %s</string>
+    <string name="picker_title">Hide apps</string>
+    <string name="picker_search_hint">Search apps\u2026</string>
+    <string name="picker_show_system">Show system apps</string>
+    <string name="picker_btn_empty">Select apps</string>
+    <string name="picker_btn_format" formatted="false">Hide %d %s</string>
 
-    <string name="label_hidden">Скрыто</string>
+    <string name="label_hidden">Hidden</string>
 
     <!-- Settings -->
-    <string name="settings_title">Настройки</string>
+    <string name="settings_title">Settings</string>
 
     <!-- Settings: Security -->
-    <string name="section_security">Безопасность</string>
-    <string name="self_hide_label">Скрыть Lokker из лаунчера</string>
-    <string name="self_hide_desc">Доступ только через горячую клавишу</string>
-    <string name="self_hide_confirm_title">Скрыть Lokker?</string>
-    <string name="self_hide_confirm_msg">Lokker будет скрыт из лаунчера. Вы сможете открыть его только горячей клавишей. Продолжить?</string>
-    <string name="set_password">Установить пароль</string>
-    <string name="change_password">Сменить пароль</string>
-    <string name="pw_not_set">Не установлен</string>
-    <string name="pw_change_desc">Изменить PIN или пароль</string>
-    <string name="biometric_label">Биометрия</string>
-    <string name="biometric_desc">Отпечаток пальца или Face Unlock</string>
+    <string name="section_security">Security</string>
+    <string name="self_hide_label">Hide Lokker from launcher</string>
+    <string name="self_hide_desc">Access only via hotkey</string>
+    <string name="self_hide_confirm_title">Hide Lokker?</string>
+    <string name="self_hide_confirm_msg">Lokker will be hidden from the launcher. You can only open it with a hotkey. Continue?</string>
+    <string name="set_password">Set password</string>
+    <string name="change_password">Change password</string>
+    <string name="pw_not_set">Not set</string>
+    <string name="pw_change_desc">Change PIN or password</string>
+    <string name="biometric_label">Biometrics</string>
+    <string name="biometric_desc">Fingerprint or Face Unlock</string>
 
     <!-- Settings: Hotkeys -->
-    <string name="section_hotkeys">Горячие клавиши</string>
-    <string name="hotkey_setup_label">Настройка горячих клавиш</string>
+    <string name="section_hotkeys">Hotkeys</string>
+    <string name="hotkey_setup_label">Hotkey setup</string>
 
     <!-- Settings: Management -->
-    <string name="section_management">Управление</string>
-    <string name="unhide_all">Раскрыть все приложения</string>
-    <string name="unhide_all_desc">Временно показать все скрытые приложения</string>
-    <string name="hide_all">Скрыть все приложения</string>
-    <string name="hide_all_desc">Повторно скрыть ранее раскрытые приложения</string>
+    <string name="section_management">Management</string>
+    <string name="unhide_all">Unhide all apps</string>
+    <string name="unhide_all_desc">Temporarily show all hidden apps</string>
+    <string name="hide_all">Hide all apps</string>
+    <string name="hide_all_desc">Re-hide previously unhidden apps</string>
 
     <!-- Settings: Data -->
-    <string name="section_data">Данные</string>
-    <string name="export_settings">Экспорт настроек</string>
-    <string name="export_desc">Сохранить конфигурацию в файл</string>
-    <string name="import_settings">Импорт настроек</string>
-    <string name="import_desc">Загрузить конфигурацию из файла</string>
-    <string name="import_confirm_title">Импорт настроек?</string>
-    <string name="import_confirm_msg">Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?</string>
-    <string name="export_success">Настройки экспортированы</string>
-    <string name="import_success">Настройки импортированы (%d приложений)</string>
-    <string name="import_error">Ошибка импорта: неверный формат файла</string>
+    <string name="section_data">Data</string>
+    <string name="export_settings">Export settings</string>
+    <string name="export_desc">Save configuration to file</string>
+    <string name="import_settings">Import settings</string>
+    <string name="import_desc">Load configuration from file</string>
+    <string name="import_confirm_title">Import settings?</string>
+    <string name="import_confirm_msg">This will replace current settings. Apps not installed on the device will be skipped. Continue?</string>
+    <string name="export_success">Settings exported</string>
+    <string name="import_success">Settings imported (%d apps)</string>
+    <string name="import_error">Import error: invalid file format</string>
 
     <!-- Settings: About -->
-    <string name="section_about">О приложении</string>
-    <string name="about_platform">LineageOS 22 · Android 15</string>
+    <string name="section_about">About</string>
+    <string name="about_platform">LineageOS 22 \u00b7 Android 15</string>
 
     <!-- Context Menu -->
-    <string name="ctx_hotkey">Назначить горячую клавишу</string>
-    <string name="ctx_launch">Запустить</string>
-    <string name="ctx_remove">Удалить из Lokker</string>
+    <string name="ctx_hotkey">Assign hotkey</string>
+    <string name="ctx_launch">Launch</string>
+    <string name="ctx_remove">Remove from Lokker</string>
 
     <!-- Remove Confirm -->
-    <string name="remove_confirm_title">Удалить из Lokker?</string>
-    <string name="remove_confirm_msg">%s будет раскрыто и удалено из управления Lokker.</string>
-    <string name="removed_msg">%s удалено из Lokker</string>
-    <string name="launching_msg">Запуск %s…</string>
+    <string name="remove_confirm_title">Remove from Lokker?</string>
+    <string name="remove_confirm_msg">%s will be unhidden and removed from Lokker.</string>
+    <string name="removed_msg">%s removed from Lokker</string>
+    <string name="launching_msg">Launching %s\u2026</string>
 
     <!-- Hotkeys -->
-    <string name="hotkey_saved">Горячая клавиша сохранена</string>
-    <string name="hotkey_app_saved">Горячая клавиша для %s сохранена</string>
-    <string name="hotkey_not_set">Не назначена</string>
-    <string name="hotkey_record_hint">Нажмите для записи новой последовательности</string>
-    <string name="hotkey_recording">Нажимайте клавиши…</string>
-    <string name="hotkey_conflict">Эта комбинация уже назначена: %s</string>
-    <string name="section_lokker_hotkey">Открытие Lokker</string>
-    <string name="section_app_hotkeys">Горячие клавиши приложений</string>
-    <string name="no_hidden_apps">Нет скрытых приложений</string>
+    <string name="hotkey_saved">Hotkey saved</string>
+    <string name="hotkey_app_saved">Hotkey for %s saved</string>
+    <string name="hotkey_not_set">Not set</string>
+    <string name="hotkey_record_hint">Tap to record a new sequence</string>
+    <string name="hotkey_recording">Press keys\u2026</string>
+    <string name="hotkey_conflict">This combination is already assigned: %s</string>
+    <string name="section_lokker_hotkey">Open Lokker</string>
+    <string name="section_app_hotkeys">App hotkeys</string>
+    <string name="no_hidden_apps">No hidden apps</string>
 
     <!-- Password -->
-    <string name="current_password">Текущий пароль</string>
-    <string name="new_password">Новый пароль</string>
-    <string name="confirm_password">Подтвердите пароль</string>
-    <string name="confirm_new_password">Подтвердите новый пароль</string>
-    <string name="pw_wrong_current">Неверный текущий пароль</string>
-    <string name="pw_too_short">Пароль должен содержать минимум 6 символов</string>
-    <string name="pw_mismatch">Пароли не совпадают</string>
-    <string name="pw_set_success">Пароль установлен</string>
-    <string name="pw_change_success">Пароль успешно изменён</string>
+    <string name="current_password">Current password</string>
+    <string name="new_password">New password</string>
+    <string name="confirm_password">Confirm password</string>
+    <string name="confirm_new_password">Confirm new password</string>
+    <string name="pw_wrong_current">Wrong current password</string>
+    <string name="pw_too_short">Password must be at least 6 characters</string>
+    <string name="pw_mismatch">Passwords don\'t match</string>
+    <string name="pw_set_success">Password set</string>
+    <string name="pw_change_success">Password changed successfully</string>
 
     <!-- Self-hide -->
-    <string name="lokker_hidden">Lokker скрыт из лаунчера</string>
-    <string name="lokker_visible">Lokker виден в лаунчере</string>
-    <string name="hotkey_required">Сначала настройте горячую клавишу</string>
+    <string name="lokker_hidden">Lokker hidden from launcher</string>
+    <string name="lokker_visible">Lokker visible in launcher</string>
+    <string name="hotkey_required">Set up a hotkey first</string>
 
     <!-- Unhide / Hide all -->
-    <string name="unhide_confirm_title">Раскрыть все?</string>
-    <string name="unhide_confirm_msg">Это раскроет все %d скрытых приложений. Закреплённые ярлыки сохранятся.</string>
-    <string name="hide_confirm_title">Скрыть все?</string>
-    <string name="hide_confirm_msg">Повторно скрыть все ранее раскрытые приложения?</string>
-    <string name="all_unhidden">Все приложения раскрыты</string>
-    <string name="all_hidden">Все приложения скрыты</string>
-    <string name="no_apps_to_unhide">Нет скрытых приложений</string>
+    <string name="unhide_confirm_title">Unhide all?</string>
+    <string name="unhide_confirm_msg">This will unhide all %d hidden apps. Pinned shortcuts will be kept.</string>
+    <string name="hide_confirm_title">Hide all?</string>
+    <string name="hide_confirm_msg">Re-hide all previously unhidden apps?</string>
+    <string name="all_unhidden">All apps unhidden</string>
+    <string name="all_hidden">All apps hidden</string>
+    <string name="no_apps_to_unhide">No hidden apps</string>
 
     <!-- Accessibility -->
-    <string name="accessibility_service_desc">Lokker использует этот сервис для отслеживания горячих клавиш и управления скрытыми приложениями.</string>
-    <string name="ctx_menu">Меню</string>
-    <string name="already_hidden">Скрыто</string>
+    <string name="accessibility_service_desc">Lokker uses this service to track hotkeys and manage hidden apps.</string>
+    <string name="ctx_menu">Menu</string>
+    <string name="already_hidden">Hidden</string>
 
     <!-- Common -->
-    <string name="cancel">Отмена</string>
-    <string name="confirm">Подтвердить</string>
-    <string name="save">Сохранить</string>
-    <string name="reset">Сбросить</string>
-    <string name="apps_hidden_count" formatted="false">%d %s скрыто</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="save">Save</string>
+    <string name="reset">Reset</string>
+    <string name="apps_hidden_count" formatted="false">%d %s hidden</string>
 </resources>
