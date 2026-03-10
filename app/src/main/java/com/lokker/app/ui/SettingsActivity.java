@@ -1,13 +1,11 @@
 package com.lokker.app.ui;
 
-import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -17,8 +15,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
@@ -35,8 +31,6 @@ import com.lokker.app.data.db.LokkerDatabase;
 import com.lokker.app.domain.AppRepository;
 import com.lokker.app.domain.AuthManager;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.List;
 
 /**
@@ -56,9 +50,6 @@ public class SettingsActivity extends AppCompatActivity {
 
     private static final int REQUEST_CHANGE_PASSWORD = 100;
 
-    private ActivityResultLauncher<Intent> exportLauncher;
-    private ActivityResultLauncher<Intent> importLauncher;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -66,31 +57,6 @@ public class SettingsActivity extends AppCompatActivity {
         prefs = LokkerPrefs.getInstance(this);
         authManager = new AuthManager(prefs);
         db = LokkerDatabase.getInstance(this);
-
-        // Register activity result launchers
-        exportLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (result.getResultCode() == Activity.RESULT_OK
-                            && result.getData() != null) {
-                        Uri uri = result.getData().getData();
-                        if (uri != null) {
-                            exportToUri(uri);
-                        }
-                    }
-                });
-
-        importLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (result.getResultCode() == Activity.RESULT_OK
-                            && result.getData() != null) {
-                        Uri uri = result.getData().getData();
-                        if (uri != null) {
-                            confirmAndImport(uri);
-                        }
-                    }
-                });
 
         rootView = buildUi();
         setContentView(rootView);
@@ -216,32 +182,6 @@ public class SettingsActivity extends AppCompatActivity {
                 getString(R.string.hide_all),
                 getString(R.string.hide_all_desc),
                 v -> showHideAllDialog());
-
-        addDivider(content);
-
-        // ── Data section ────────────────────────────────────────────────
-        addSectionHeader(content, R.string.section_data);
-
-        addClickItem(content,
-                getString(R.string.export_settings),
-                getString(R.string.export_desc),
-                v -> {
-                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("application/json");
-                    intent.putExtra(Intent.EXTRA_TITLE, "lokker_backup.json");
-                    exportLauncher.launch(intent);
-                });
-
-        addClickItem(content,
-                getString(R.string.import_settings),
-                getString(R.string.import_desc),
-                v -> {
-                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("application/json");
-                    importLauncher.launch(intent);
-                });
 
         addDivider(content);
 
@@ -454,130 +394,6 @@ public class SettingsActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();
-    }
-
-    // ── Export / Import ─────────────────────────────────────────────────
-
-    private void exportToUri(Uri uri) {
-        new Thread(() -> {
-            try {
-                List<LokkerApp> apps = db.lokkerAppDao().getAll();
-                org.json.JSONArray arr = new org.json.JSONArray();
-                if (apps != null) {
-                    for (LokkerApp app : apps) {
-                        org.json.JSONObject obj = new org.json.JSONObject();
-                        obj.put("packageName", app.packageName);
-                        obj.put("appLabel", app.appLabel);
-                        obj.put("hidden", app.hidden);
-                        if (app.hotkeySequence != null) {
-                            org.json.JSONArray hk = new org.json.JSONArray();
-                            for (Integer k : app.hotkeySequence) hk.put(k);
-                            obj.put("hotkeySequence", hk);
-                        }
-                        arr.put(obj);
-                    }
-                }
-                org.json.JSONObject root = new org.json.JSONObject();
-                root.put("apps", arr);
-                root.put("version", 1);
-
-                try (OutputStream os = getContentResolver().openOutputStream(uri)) {
-                    if (os != null) {
-                        os.write(root.toString(2).getBytes());
-                    }
-                }
-                runOnUiThread(() ->
-                    Snackbar.make(rootView, R.string.export_success,
-                            Snackbar.LENGTH_SHORT).show()
-                );
-            } catch (Exception e) {
-                runOnUiThread(() ->
-                    Snackbar.make(rootView,
-                            e.getMessage() != null ? e.getMessage() : "Export failed",
-                            Snackbar.LENGTH_SHORT).show()
-                );
-            }
-        }).start();
-    }
-
-    private void confirmAndImport(Uri uri) {
-        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-                .setTitle(R.string.import_confirm_title)
-                .setMessage(R.string.import_confirm_msg)
-                .setPositiveButton(R.string.confirm, (d, w) -> importFromUri(uri))
-                .setNegativeButton(R.string.cancel, null)
-                .show();
-    }
-
-    private void importFromUri(Uri uri) {
-        new Thread(() -> {
-            try {
-                InputStream is = getContentResolver().openInputStream(uri);
-                if (is == null) return;
-                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                byte[] buf = new byte[4096];
-                int n;
-                while ((n = is.read(buf)) != -1) {
-                    baos.write(buf, 0, n);
-                }
-                is.close();
-                byte[] bytes = baos.toByteArray();
-
-                org.json.JSONObject root = new org.json.JSONObject(new String(bytes));
-                org.json.JSONArray arr = root.getJSONArray("apps");
-                int count = 0;
-
-                for (int i = 0; i < arr.length(); i++) {
-                    org.json.JSONObject obj = arr.getJSONObject(i);
-                    String pkg = obj.getString("packageName");
-
-                    // Skip if app not installed
-                    try {
-                        getPackageManager().getApplicationInfo(pkg, 0);
-                    } catch (PackageManager.NameNotFoundException e) {
-                        continue;
-                    }
-
-                    List<Integer> hotkey = null;
-                    if (obj.has("hotkeySequence")) {
-                        org.json.JSONArray hkArr = obj.getJSONArray("hotkeySequence");
-                        hotkey = new java.util.ArrayList<>();
-                        for (int j = 0; j < hkArr.length(); j++) {
-                            hotkey.add(hkArr.getInt(j));
-                        }
-                    }
-
-                    LokkerApp app = new LokkerApp(
-                            pkg,
-                            obj.optString("appLabel", pkg),
-                            hotkey,
-                            obj.optBoolean("hidden", false),
-                            System.currentTimeMillis());
-                    db.lokkerAppDao().insert(app);
-                    count++;
-                }
-
-                int finalCount = count;
-                runOnUiThread(() -> {
-                    Snackbar.make(rootView,
-                            getString(R.string.import_success, finalCount),
-                            Snackbar.LENGTH_SHORT).show();
-                    // Restart app after import to refresh all state
-                    rootView.postDelayed(() -> {
-                        Intent restart = new Intent(this, MainActivity.class);
-                        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                        startActivity(restart);
-                        Runtime.getRuntime().exit(0);
-                    }, 1500);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() ->
-                    Snackbar.make(rootView, R.string.import_error,
-                            Snackbar.LENGTH_SHORT).show()
-                );
-            }
-        }).start();
     }
 
     // ── Utility ─────────────────────────────────────────────────────────
