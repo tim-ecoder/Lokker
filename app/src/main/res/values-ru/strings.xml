@@ -86,6 +86,7 @@
     <string name="hotkey_saved">Горячая клавиша сохранена</string>
     <string name="hotkey_app_saved">Горячая клавиша для %s сохранена</string>
     <string name="hotkey_not_set">Не назначена</string>
+    <string name="hotkeys_configured_count" formatted="false">%d назначено</string>
     <string name="hotkey_record_hint">Нажмите для записи новой последовательности</string>
     <string name="hotkey_recording">Нажимайте клавиши…</string>
     <string name="hotkey_conflict">Эта комбинация уже назначена: %s</string>

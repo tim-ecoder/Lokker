@@ -86,6 +86,7 @@
     <string name="hotkey_saved">Hotkey saved</string>
     <string name="hotkey_app_saved">Hotkey for %s saved</string>
     <string name="hotkey_not_set">Not set</string>
+    <string name="hotkeys_configured_count" formatted="false">%d configured</string>
     <string name="hotkey_record_hint">Tap to record a new sequence</string>
     <string name="hotkey_recording">Press keys\u2026</string>
     <string name="hotkey_conflict">This combination is already assigned: %s</string>

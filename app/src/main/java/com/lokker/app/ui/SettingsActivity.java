@@ -159,7 +159,6 @@ public class SettingsActivity extends AppCompatActivity {
         // ── Hotkeys section ─────────────────────────────────────────────
         addSectionHeader(content, R.string.section_hotkeys);
 
-        // Determine current hotkey subtitle
         addClickItem(content,
                 getString(R.string.hotkey_setup_label),
                 getString(R.string.hotkey_not_set),
@@ -167,6 +166,26 @@ public class SettingsActivity extends AppCompatActivity {
                     Intent intent = new Intent(this, HotkeySetupActivity.class);
                     startActivity(intent);
                 });
+
+        // Update hotkey count subtitle asynchronously
+        LinearLayout hotkeyRow = (LinearLayout) content.getChildAt(content.getChildCount() - 1);
+        TextView hotkeyDesc = (TextView) hotkeyRow.getChildAt(1);
+        new Thread(() -> {
+            HotkeyMap hkMap = db.hotkeyMapDao().get();
+            List<LokkerApp> allApps = db.lokkerAppDao().getAll();
+            int count = 0;
+            if (hkMap != null && hkMap.lokkerHotkey != null && !hkMap.lokkerHotkey.isEmpty()) count++;
+            if (allApps != null) {
+                for (LokkerApp a : allApps) {
+                    if (a.hotkeySequence != null && !a.hotkeySequence.isEmpty()) count++;
+                }
+            }
+            if (count > 0) {
+                int c = count;
+                runOnUiThread(() -> hotkeyDesc.setText(
+                        getString(R.string.hotkeys_configured_count, c)));
+            }
+        }).start();
 
         addDivider(content);
 
