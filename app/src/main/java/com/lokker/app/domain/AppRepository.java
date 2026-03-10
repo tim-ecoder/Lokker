@@ -18,6 +18,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.os.IBinder;
+import android.util.Log;
 
 import androidx.lifecycle.LiveData;
 
@@ -53,6 +54,7 @@ import java.util.Set;
  */
 public class AppRepository {
 
+    private static final String TAG = "AppRepository";
     private static final String KEY_PENDING_REHIDE = "pending_rehide";
     private static final String KEY_UNHIDE_ALL_SNAPSHOT = "unhide_all_snapshot";
     private static final String KEY_SELF_HIDDEN = "self_hidden";
@@ -96,7 +98,7 @@ public class AppRepository {
     /**
      * Add an application to Lokker's managed list.  Caches the icon and
      * label (which must happen before the app is hidden), inserts a Room
-     * record, and creates a pinned shortcut.  Does <b>not</b> hide the
+     * record, and updates dynamic shortcuts.  Does <b>not</b> hide the
      * app; call {@link #hideApp(String)} separately.
      */
     public void addApplication(String packageName) {
@@ -112,7 +114,7 @@ public class AppRepository {
         );
         appDao.insert(record);
 
-        createPinnedShortcut(packageName);
+        rebuildDynamicShortcuts();
     }
 
     /**
@@ -127,10 +129,7 @@ public class AppRepository {
         pendingRehide.remove(packageName);
         persistPendingRehide();
 
-        ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-        if (sm != null) {
-            sm.disableShortcuts(Collections.singletonList("lokker_" + packageName));
-        }
+        rebuildDynamicShortcuts();
 
         new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
     }
@@ -508,35 +507,53 @@ public class AppRepository {
         return imported;
     }
 
-    // ── Pinned shortcuts ────────────────────────────────────────────────
+    // ── Dynamic shortcuts (appear on long-press of Lokker icon) ────────
 
     /**
-     * Create a pinned shortcut on the home screen that launches through
-     * {@code AuthActivity}.
+     * Rebuild the full list of dynamic shortcuts from the current DB state.
+     * Each hidden app gets a shortcut that launches through AuthActivity.
+     * Max count is limited by the launcher (typically 4–5).
      */
-    public void createPinnedShortcut(String packageName) {
-        LokkerApp record = appDao.get(packageName);
-        if (record == null) return;
-
+    public void rebuildDynamicShortcuts() {
         ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-        if (sm == null || !sm.isRequestPinShortcutSupported()) return;
+        if (sm == null) return;
 
+        List<LokkerApp> apps = appDao.getAll();
+        if (apps == null || apps.isEmpty()) {
+            sm.removeAllDynamicShortcuts();
+            return;
+        }
+
+        List<ShortcutInfo> shortcuts = new ArrayList<>();
+
+        for (LokkerApp app : apps) {
+            ShortcutInfo si = buildShortcutInfo(sm, app);
+            if (si != null) shortcuts.add(si);
+        }
+
+        sm.setDynamicShortcuts(shortcuts);
+        Log.d(TAG, "rebuildDynamicShortcuts: " + shortcuts.size() + " shortcuts set");
+    }
+
+    private ShortcutInfo buildShortcutInfo(ShortcutManager sm, LokkerApp app) {
         Intent target = new Intent(ctx, AuthActivity.class);
         target.setAction("com.lokker.app.LAUNCH_HIDDEN");
-        target.putExtra("target_package", packageName);
+        target.putExtra("target_package", app.packageName);
 
-        Icon icon = loadCachedIcon(packageName);
+        Icon icon = loadCachedIcon(app.packageName);
         if (icon == null) {
             icon = Icon.createWithResource(ctx, R.drawable.ic_launcher);
         }
 
-        ShortcutInfo shortcut = new ShortcutInfo.Builder(ctx, "lokker_" + packageName)
-                .setShortLabel(record.appLabel != null ? record.appLabel : packageName)
+        String label = app.appLabel != null ? app.appLabel : app.packageName;
+
+        return new ShortcutInfo.Builder(ctx, "lokker_" + app.packageName)
+                .setShortLabel(label)
+                .setLongLabel(label)
                 .setIcon(icon)
                 .setIntent(target)
+                .setRank(0)
                 .build();
-
-        sm.requestPinShortcut(shortcut, null);
     }
 
     // ── Icon caching ────────────────────────────────────────────────────

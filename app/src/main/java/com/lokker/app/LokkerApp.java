@@ -29,11 +29,16 @@ public class LokkerApp extends Application {
         // Recover any apps that were temporarily unhidden but leaked due to
         // process death.  This must run as early as possible to minimise the
         // window during which a hidden app is visible after a crash/kill.
-        try {
-            AppRepository.getInstance(this).recoverLeakedApps();
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to recover leaked apps on startup", e);
-        }
+        // Also rebuild dynamic shortcuts so they stay in sync.
+        new Thread(() -> {
+            try {
+                AppRepository repo = AppRepository.getInstance(this);
+                repo.recoverLeakedApps();
+                repo.rebuildDynamicShortcuts();
+            } catch (Exception e) {
+                Log.e(TAG, "Failed startup recovery", e);
+            }
+        }).start();
     }
 
     private void ensureAccessibilityServiceEnabled() {
