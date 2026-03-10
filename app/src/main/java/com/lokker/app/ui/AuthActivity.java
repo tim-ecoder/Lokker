@@ -7,9 +7,17 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.CountDownTimer;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
+import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -25,22 +33,12 @@ import androidx.core.content.ContextCompat;
 import com.google.android.material.snackbar.Snackbar;
 import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
-import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 import com.lokker.app.domain.AuthManager;
 
 /**
- * PIN entry screen with 6-digit PIN pad and biometric fallback.
- *
- * Intent extras:
- *   "target_package" (optional) - if set, unlocks and launches that hidden app
- *                                 instead of navigating to MainActivity.
- *
- * Behaviour:
- *   - If no password is set, skips straight to the target destination.
- *   - Shows BiometricPrompt first (if enrolled), falls back to PIN pad.
- *   - Wrong PIN: shake animation on dots, snackbar error, increment fail count.
- *   - 5 consecutive failures: 30-second lockout with countdown, keypad disabled.
- *   - excludeFromRecents = true (set in manifest).
+ * PIN entry screen with 6-digit on-screen keypad, IME keyboard support,
+ * and biometric fallback.
  */
 public class AuthActivity extends AppCompatActivity {
 
@@ -51,7 +49,7 @@ public class AuthActivity extends AppCompatActivity {
     private final View[] dotViews = new View[PIN_LENGTH];
     private LinearLayout dotsContainer;
     private GridLayout keypad;
-    private ImageButton biometricButton;
+    private EditText pinInput;
     private TextView lockoutText;
     private View rootView;
 
@@ -69,13 +67,11 @@ public class AuthActivity extends AppCompatActivity {
         authManager = new AuthManager(prefs);
         targetPackage = getIntent().getStringExtra("target_package");
 
-        // If no password set, skip auth entirely
         if (!authManager.hasPassword()) {
             proceedAfterAuth();
             return;
         }
 
-        // Check if already locked out from a previous session
         if (authManager.isLockedOut()) {
             buildUi();
             long remaining = authManager.getLockoutRemaining();
@@ -86,7 +82,6 @@ public class AuthActivity extends AppCompatActivity {
             buildUi();
         }
 
-        // Try biometric first if enrolled
         if (prefs.isBiometricEnrolled()) {
             showBiometricPrompt();
         }
@@ -98,7 +93,7 @@ public class AuthActivity extends AppCompatActivity {
         BiometricManager mgr = BiometricManager.from(this);
         if (mgr.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 != BiometricManager.BIOMETRIC_SUCCESS) {
-            return; // hardware unavailable - fall back to PIN pad
+            return;
         }
 
         BiometricPrompt prompt = new BiometricPrompt(this,
@@ -114,12 +109,10 @@ public class AuthActivity extends AppCompatActivity {
                     @Override
                     public void onAuthenticationError(int errorCode,
                             @NonNull CharSequence errString) {
-                        // User cancelled or hardware error - stay on PIN screen
                     }
 
                     @Override
                     public void onAuthenticationFailed() {
-                        // Single attempt failed - biometric prompt handles retries
                     }
                 });
 
@@ -132,60 +125,69 @@ public class AuthActivity extends AppCompatActivity {
         prompt.authenticate(info);
     }
 
-    // ── UI construction (programmatic) ──────────────────────────────────
+    // ── UI construction ──────────────────────────────────────────────────
 
     private void buildUi() {
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int screenW = dm.widthPixels;
+        int btnW = (int) (screenW / 4.0f);
+        int btnH = dp(80);
+
         LinearLayout root = new LinearLayout(this);
+        root.setFitsSystemWindows(true);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
-        int pad = dp(32);
-        root.setPadding(pad, dp(64), pad, dp(32));
         rootView = root;
 
-        // Logo
+        // Spacer pushes content to bottom
+        View spacer = new View(this);
+        root.addView(spacer, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // ── Header ───────────────────────────────────────────────────────
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setGravity(Gravity.CENTER_HORIZONTAL);
+
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.ic_launcher);
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(72), dp(72));
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         logoLp.gravity = Gravity.CENTER_HORIZONTAL;
-        logoLp.bottomMargin = dp(16);
-        root.addView(logo, logoLp);
+        header.addView(logo, logoLp);
 
-        // Title
         TextView title = new TextView(this);
         title.setText(R.string.pin_title);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(getResColor(R.color.colorOnSurface));
         title.setGravity(Gravity.CENTER);
-        root.addView(title);
+        header.addView(title);
 
-        // Subtitle
         TextView subtitle = new TextView(this);
         subtitle.setText(R.string.pin_subtitle);
-        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         subtitle.setTextColor(getResColor(R.color.colorOnSurfaceMedium));
         subtitle.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        subLp.topMargin = dp(4);
-        subLp.bottomMargin = dp(32);
-        root.addView(subtitle, subLp);
+        header.addView(subtitle);
 
-        // PIN dots
+        root.addView(header, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // ── PIN dots ─────────────────────────────────────────────────────
         dotsContainer = new LinearLayout(this);
         dotsContainer.setOrientation(LinearLayout.HORIZONTAL);
         dotsContainer.setGravity(Gravity.CENTER);
+        int dotSize = dp(16);
         for (int i = 0; i < PIN_LENGTH; i++) {
             View dot = new View(this);
             GradientDrawable bg = new GradientDrawable();
             bg.setShape(GradientDrawable.OVAL);
-            bg.setSize(dp(16), dp(16));
+            bg.setSize(dotSize, dotSize);
             bg.setStroke(dp(2), getResColor(R.color.colorPrimary));
             bg.setColor(Color.TRANSPARENT);
             dot.setBackground(bg);
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(16), dp(16));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dotSize, dotSize);
             dlp.setMargins(dp(8), 0, dp(8), 0);
             dotsContainer.addView(dot, dlp);
             dotViews[i] = dot;
@@ -193,75 +195,90 @@ public class AuthActivity extends AppCompatActivity {
         LinearLayout.LayoutParams dotsLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        dotsLp.bottomMargin = dp(16);
+        dotsLp.gravity = Gravity.CENTER_HORIZONTAL;
+        dotsLp.topMargin = dp(16);
+        dotsLp.bottomMargin = dp(4);
         root.addView(dotsContainer, dotsLp);
 
-        // Lockout text (hidden by default)
+        // Lockout text
         lockoutText = new TextView(this);
         lockoutText.setTextColor(getResColor(R.color.colorError));
-        lockoutText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        lockoutText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         lockoutText.setGravity(Gravity.CENTER);
         lockoutText.setVisibility(View.GONE);
         LinearLayout.LayoutParams ltLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        ltLp.bottomMargin = dp(16);
+        ltLp.gravity = Gravity.CENTER_HORIZONTAL;
+        ltLp.topMargin = dp(4);
         root.addView(lockoutText, ltLp);
 
-        // Keypad 4x3 grid
+        // ── Hidden EditText for IME keyboard input ───────────────────────
+        pinInput = new EditText(this);
+        pinInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pinInput.setTextColor(Color.TRANSPARENT);
+        pinInput.setBackgroundColor(Color.TRANSPARENT);
+        pinInput.setCursorVisible(false);
+        pinInput.setTextSize(1);
+        pinInput.setMaxLines(1);
+        pinInput.setSingleLine(true);
+        pinInput.setFocusable(true);
+        pinInput.setFocusableInTouchMode(true);
+        root.addView(pinInput, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        pinInput.addTextChangedListener(imeWatcher);
+
+        // ── Keypad 4x3 grid ─────────────────────────────────────────────
         keypad = new GridLayout(this);
         keypad.setColumnCount(3);
         keypad.setRowCount(4);
-        keypad.setUseDefaultMargins(true);
+        keypad.setUseDefaultMargins(false);
 
-        String[] keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "\u232B"};
+        String[] keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9",
+                "\uD83D\uDD13", "0", "\u232B"};
         for (String key : keys) {
-            if (key.isEmpty()) {
-                // Empty cell - placeholder for biometric button
-                biometricButton = new ImageButton(this);
-                biometricButton.setImageResource(android.R.drawable.ic_dialog_info);
-                biometricButton.setBackgroundColor(Color.TRANSPARENT);
-                biometricButton.setContentDescription("Biometric");
-                biometricButton.setOnClickListener(v -> {
-                    if (prefs.isBiometricEnrolled()) {
-                        showBiometricPrompt();
-                    }
+            if ("\uD83D\uDD13".equals(key)) {
+                // Biometric button
+                ImageButton bioBtn = new ImageButton(this);
+                bioBtn.setImageResource(android.R.drawable.ic_dialog_info);
+                bioBtn.setBackgroundColor(Color.TRANSPARENT);
+                bioBtn.setContentDescription("Biometric");
+                bioBtn.setOnClickListener(v -> {
+                    if (prefs.isBiometricEnrolled()) showBiometricPrompt();
                 });
                 GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
-                glp.width = dp(72);
-                glp.height = dp(56);
+                glp.width = btnW;
+                glp.height = btnH;
                 glp.setGravity(Gravity.CENTER);
-                keypad.addView(biometricButton, glp);
+                keypad.addView(bioBtn, glp);
             } else if ("\u232B".equals(key)) {
+                // Backspace
                 ImageButton backspace = new ImageButton(this);
                 backspace.setImageResource(android.R.drawable.ic_input_delete);
                 backspace.setBackgroundColor(Color.TRANSPARENT);
                 backspace.setContentDescription("Backspace");
                 backspace.setOnClickListener(v -> onBackspacePressed());
                 GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
-                glp.width = dp(72);
-                glp.height = dp(56);
+                glp.width = btnW;
+                glp.height = btnH;
                 glp.setGravity(Gravity.CENTER);
                 keypad.addView(backspace, glp);
             } else {
+                // Digit button
                 TextView btn = new TextView(this);
                 btn.setText(key);
-                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+                btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
                 btn.setTypeface(Typeface.DEFAULT_BOLD);
                 btn.setTextColor(getResColor(R.color.colorOnSurface));
                 btn.setGravity(Gravity.CENTER);
                 btn.setClickable(true);
                 btn.setFocusable(true);
-
-                TypedValue outValue = new TypedValue();
-                getTheme().resolveAttribute(
-                        android.R.attr.selectableItemBackgroundBorderless, outValue, true);
-                btn.setBackgroundResource(outValue.resourceId);
+                btn.setBackgroundColor(Color.TRANSPARENT);
 
                 btn.setOnClickListener(v -> onDigitPressed(key));
                 GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
-                glp.width = dp(72);
-                glp.height = dp(56);
+                glp.width = btnW;
+                glp.height = btnH;
                 glp.setGravity(Gravity.CENTER);
                 keypad.addView(btn, glp);
             }
@@ -271,23 +288,54 @@ public class AuthActivity extends AppCompatActivity {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         kpLp.gravity = Gravity.CENTER_HORIZONTAL;
+        kpLp.topMargin = dp(8);
+        kpLp.bottomMargin = dp(16);
         root.addView(keypad, kpLp);
 
         setContentView(root);
     }
 
-    // ── Keypad logic ────────────────────────────────────────────────────
+    // ── IME TextWatcher (syncs IME input → pinBuffer → dots) ─────────
+
+    private final TextWatcher imeWatcher = new TextWatcher() {
+        @Override
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+        @Override
+        public void afterTextChanged(Editable s) {
+            if (lockedOut) {
+                s.clear();
+                return;
+            }
+            if (s.length() > PIN_LENGTH) {
+                s.delete(PIN_LENGTH, s.length());
+                return;
+            }
+            // Sync IME → pinBuffer
+            pinBuffer.setLength(0);
+            pinBuffer.append(s);
+            updateDots();
+            if (pinBuffer.length() == PIN_LENGTH) {
+                dotsContainer.post(() -> validatePin());
+            }
+        }
+    };
+
+    // ── On-screen keypad logic ───────────────────────────────────────────
 
     private void onDigitPressed(String digit) {
         if (lockedOut) return;
         if (pinBuffer.length() >= PIN_LENGTH) return;
 
         pinBuffer.append(digit);
+        syncInputFromBuffer();
         updateDots();
 
         if (pinBuffer.length() == PIN_LENGTH) {
-            // Small delay so user sees the last dot fill
-            rootView.postDelayed(this::validatePin, 150);
+            dotsContainer.post(this::validatePin);
         }
     }
 
@@ -295,15 +343,52 @@ public class AuthActivity extends AppCompatActivity {
         if (lockedOut) return;
         if (pinBuffer.length() > 0) {
             pinBuffer.deleteCharAt(pinBuffer.length() - 1);
+            syncInputFromBuffer();
             updateDots();
         }
     }
 
+    /** Push pinBuffer content into the hidden EditText without triggering imeWatcher. */
+    private void syncInputFromBuffer() {
+        pinInput.removeTextChangedListener(imeWatcher);
+        pinInput.setText(pinBuffer);
+        pinInput.setSelection(pinBuffer.length());
+        pinInput.addTextChangedListener(imeWatcher);
+    }
+
+    // ── Hardware keyboard support ────────────────────────────────────────
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (lockedOut) return super.onKeyDown(keyCode, event);
+
+        if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+            onDigitPressed(String.valueOf(keyCode - KeyEvent.KEYCODE_0));
+            return true;
+        }
+        if (keyCode >= KeyEvent.KEYCODE_NUMPAD_0 && keyCode <= KeyEvent.KEYCODE_NUMPAD_9) {
+            onDigitPressed(String.valueOf(keyCode - KeyEvent.KEYCODE_NUMPAD_0));
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            if (pinBuffer.length() == PIN_LENGTH) validatePin();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DEL) {
+            onBackspacePressed();
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    // ── Dots & validation ────────────────────────────────────────────────
+
     private void updateDots() {
+        int dotSize = dp(16);
         for (int i = 0; i < PIN_LENGTH; i++) {
             GradientDrawable bg = new GradientDrawable();
             bg.setShape(GradientDrawable.OVAL);
-            bg.setSize(dp(16), dp(16));
+            bg.setSize(dotSize, dotSize);
             if (i < pinBuffer.length()) {
                 bg.setColor(getResColor(R.color.colorPrimary));
             } else {
@@ -322,10 +407,11 @@ public class AuthActivity extends AppCompatActivity {
         } else {
             authManager.incrementFailCount();
             int failCount = authManager.getFailCount();
+
             pinBuffer.setLength(0);
+            syncInputFromBuffer();
             updateDots();
 
-            // Shake animation on dots
             ObjectAnimator shake = ObjectAnimator.ofFloat(dotsContainer, "translationX",
                     0, dp(10), -dp(10), dp(10), -dp(10), dp(5), -dp(5), 0);
             shake.setDuration(400);
@@ -350,9 +436,7 @@ public class AuthActivity extends AppCompatActivity {
         setKeypadEnabled(false);
         lockoutText.setVisibility(View.VISIBLE);
 
-        if (lockoutTimer != null) {
-            lockoutTimer.cancel();
-        }
+        if (lockoutTimer != null) lockoutTimer.cancel();
 
         lockoutTimer = new CountDownTimer(durationMs, 1000) {
             @Override
@@ -376,32 +460,30 @@ public class AuthActivity extends AppCompatActivity {
             keypad.getChildAt(i).setEnabled(enabled);
             keypad.getChildAt(i).setAlpha(enabled ? 1f : 0.3f);
         }
+        pinInput.setEnabled(enabled);
     }
 
     // ── Navigation ──────────────────────────────────────────────────────
 
     private void proceedAfterAuth() {
         if (targetPackage != null && !targetPackage.isEmpty()) {
-            // Unhide temporarily and launch via the database/system layer.
-            // In production this delegates to AppRepository; here we use
-            // a background thread through the database directly.
-            LokkerDatabase db = LokkerDatabase.getInstance(getApplicationContext());
+            AppRepository repo = AppRepository.getInstance(getApplicationContext());
             new Thread(() -> {
-                db.lokkerAppDao().setHidden(targetPackage, false);
+                repo.unhideTemporarily(targetPackage);
                 runOnUiThread(() -> {
-                    // Attempt to launch the hidden app
-                    Intent launchIntent = getPackageManager()
-                            .getLaunchIntentForPackage(targetPackage);
-                    if (launchIntent != null) {
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(launchIntent);
-                    }
+                    repo.launchHiddenApp(targetPackage);
                     finish();
                 });
             }).start();
+        } else if (getCallingActivity() != null) {
+            // Launched via startActivityForResult — return OK to caller
+            setResult(RESULT_OK);
+            finish();
         } else {
-            Intent main = new Intent(this, MainActivity.class);
-            startActivity(main);
+            // Launched directly (e.g., from hotkey or launcher)
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.putExtra("authenticated", true);
+            startActivity(intent);
             finish();
         }
     }
@@ -427,8 +509,6 @@ public class AuthActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (lockoutTimer != null) {
-            lockoutTimer.cancel();
-        }
+        if (lockoutTimer != null) lockoutTimer.cancel();
     }
 }

@@ -3,6 +3,22 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        def keystoreFile = file('D:/Programming/keystores/keystore3.jks')
+        debug {
+            storeFile keystoreFile
+            storePassword 'qwerty'
+            keyAlias 'key0'
+            keyPassword 'qwerty'
+        }
+        release {
+            storeFile keystoreFile
+            storePassword 'qwerty'
+            keyAlias 'key0'
+            keyPassword 'qwerty'
+        }
+    }
+
     namespace "com.lokker.app"
     compileSdk 35
 
@@ -15,7 +31,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

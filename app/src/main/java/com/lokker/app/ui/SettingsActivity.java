@@ -32,6 +32,7 @@ import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.data.db.HotkeyMap;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 import com.lokker.app.domain.AuthManager;
 
 import java.io.InputStream;
@@ -99,6 +100,7 @@ public class SettingsActivity extends AppCompatActivity {
 
     private View buildUi() {
         LinearLayout outer = new LinearLayout(this);
+        outer.setFitsSystemWindows(true);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
 
@@ -388,7 +390,7 @@ public class SettingsActivity extends AppCompatActivity {
         prefs.setStealthMode(hidden);
         PackageManager pm = getPackageManager();
         ComponentName alias = new ComponentName(this,
-                getPackageName() + ".MainActivityAlias");
+                getPackageName() + ".LokkerLauncher");
         pm.setComponentEnabledSetting(alias,
                 hidden ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
                        : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
@@ -415,9 +417,8 @@ public class SettingsActivity extends AppCompatActivity {
                         .setMessage(getString(R.string.unhide_confirm_msg, hidden.size()))
                         .setPositiveButton(R.string.confirm, (d, w) -> {
                             new Thread(() -> {
-                                for (LokkerApp app : hidden) {
-                                    db.lokkerAppDao().setHidden(app.packageName, false);
-                                }
+                                AppRepository repo = AppRepository.getInstance(SettingsActivity.this);
+                                repo.unhideAll();
                                 runOnUiThread(() ->
                                     Snackbar.make(rootView, R.string.all_unhidden,
                                             Snackbar.LENGTH_SHORT).show()
@@ -436,12 +437,8 @@ public class SettingsActivity extends AppCompatActivity {
                 .setMessage(R.string.hide_confirm_msg)
                 .setPositiveButton(R.string.confirm, (d, w) -> {
                     new Thread(() -> {
-                        List<LokkerApp> all = db.lokkerAppDao().getAll();
-                        if (all != null) {
-                            for (LokkerApp app : all) {
-                                db.lokkerAppDao().setHidden(app.packageName, true);
-                            }
-                        }
+                        AppRepository repo = AppRepository.getInstance(SettingsActivity.this);
+                        repo.rehideAll();
                         runOnUiThread(() ->
                             Snackbar.make(rootView, R.string.all_hidden,
                                     Snackbar.LENGTH_SHORT).show()
@@ -477,10 +474,10 @@ public class SettingsActivity extends AppCompatActivity {
                 root.put("apps", arr);
                 root.put("version", 1);
 
-                OutputStream os = getContentResolver().openOutputStream(uri);
-                if (os != null) {
-                    os.write(root.toString(2).getBytes());
-                    os.close();
+                try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                    if (os != null) {
+                        os.write(root.toString(2).getBytes());
+                    }
                 }
                 runOnUiThread(() ->
                     Snackbar.make(rootView, R.string.export_success,
@@ -488,7 +485,8 @@ public class SettingsActivity extends AppCompatActivity {
                 );
             } catch (Exception e) {
                 runOnUiThread(() ->
-                    Snackbar.make(rootView, e.getMessage(),
+                    Snackbar.make(rootView,
+                            e.getMessage() != null ? e.getMessage() : "Export failed",
                             Snackbar.LENGTH_SHORT).show()
                 );
             }
@@ -509,9 +507,14 @@ public class SettingsActivity extends AppCompatActivity {
             try {
                 InputStream is = getContentResolver().openInputStream(uri);
                 if (is == null) return;
-                byte[] bytes = new byte[is.available()];
-                is.read(bytes);
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[4096];
+                int n;
+                while ((n = is.read(buf)) != -1) {
+                    baos.write(buf, 0, n);
+                }
                 is.close();
+                byte[] bytes = baos.toByteArray();
 
                 org.json.JSONObject root = new org.json.JSONObject(new String(bytes));
                 org.json.JSONArray arr = root.getJSONArray("apps");

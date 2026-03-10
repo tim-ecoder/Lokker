@@ -64,6 +64,7 @@ public class ChangePasswordActivity extends AppCompatActivity {
 
     private void buildUi() {
         LinearLayout outer = new LinearLayout(this);
+        outer.setFitsSystemWindows(true);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
 

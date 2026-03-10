@@ -33,6 +33,7 @@ import com.google.android.material.snackbar.Snackbar;
 import com.lokker.app.R;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -55,6 +56,7 @@ import java.util.Set;
 public class AppPickerDialog extends AppCompatActivity {
 
     private LokkerDatabase db;
+    private AppRepository repo;
     private PickerAdapter adapter;
     private MaterialButton confirmBtn;
     private View rootView;
@@ -68,6 +70,7 @@ public class AppPickerDialog extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         db = LokkerDatabase.getInstance(this);
+        repo = AppRepository.getInstance(this);
         rootView = buildUi();
         setContentView(rootView);
         loadInstalledApps();
@@ -77,6 +80,7 @@ public class AppPickerDialog extends AppCompatActivity {
 
     private View buildUi() {
         LinearLayout outer = new LinearLayout(this);
+        outer.setFitsSystemWindows(true);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
 
@@ -219,15 +223,8 @@ public class AppPickerDialog extends AppCompatActivity {
 
         new Thread(() -> {
             for (String pkg : packages) {
-                String label = pkg;
-                try {
-                    ApplicationInfo info = pm.getApplicationInfo(pkg, 0);
-                    label = pm.getApplicationLabel(info).toString();
-                } catch (PackageManager.NameNotFoundException ignored) {}
-
-                LokkerApp app = new LokkerApp(
-                        pkg, label, null, true, System.currentTimeMillis());
-                db.lokkerAppDao().insert(app);
+                repo.addApplication(pkg);
+                repo.hideApp(pkg);
             }
 
             int count = packages.size();
@@ -403,6 +400,9 @@ public class AppPickerDialog extends AppCompatActivity {
                 holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
             }
 
+            // Remove previous listener BEFORE setting checked state to avoid recycling issues
+            holder.checkbox.setOnCheckedChangeListener(null);
+
             if (entry.alreadyManaged) {
                 holder.badge.setVisibility(View.VISIBLE);
                 holder.checkbox.setEnabled(false);
@@ -416,8 +416,6 @@ public class AppPickerDialog extends AppCompatActivity {
                 holder.itemView.setAlpha(1f);
             }
 
-            // Remove previous listener to avoid recycling issues
-            holder.checkbox.setOnCheckedChangeListener(null);
             holder.checkbox.setOnCheckedChangeListener((btn, checked) -> {
                 if (entry.alreadyManaged) return;
                 if (checked) {

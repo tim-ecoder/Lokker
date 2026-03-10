@@ -22,7 +22,7 @@ public interface LokkerAppDao {
     @Query("SELECT EXISTS(SELECT 1 FROM lokker_apps WHERE packageName = :packageName)")
     boolean isManaged(String packageName);
 
-    @Query("SELECT hidden FROM lokker_apps WHERE packageName = :packageName")
+    @Query("SELECT EXISTS(SELECT 1 FROM lokker_apps WHERE packageName = :packageName AND hidden = 1)")
     boolean isHidden(String packageName);
 
     @Query("SELECT * FROM lokker_apps WHERE hidden = 1 ORDER BY appLabel ASC")

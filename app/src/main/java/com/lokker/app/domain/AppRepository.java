@@ -14,6 +14,7 @@ import android.graphics.Canvas;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
+import android.os.IBinder;
 
 import androidx.lifecycle.LiveData;
 
@@ -398,7 +399,7 @@ public class AppRepository {
             // Settings
             root.put("selfHidden", prefs.getBoolean(KEY_SELF_HIDDEN, false));
             root.put("biometricEnabled",
-                    prefs.getBoolean(LokkerPrefs.KEY_BIOMETRIC_ENROLLED, true));
+                    prefs.getBoolean(LokkerPrefs.KEY_BIOMETRIC_ENROLLED, false));
             root.put("version", 1);
 
             return root.toString(2);
@@ -471,7 +472,7 @@ public class AppRepository {
         prefs.edit()
                 .putBoolean(KEY_SELF_HIDDEN, root.optBoolean("selfHidden", false))
                 .putBoolean(LokkerPrefs.KEY_BIOMETRIC_ENROLLED,
-                        root.optBoolean("biometricEnabled", true))
+                        root.optBoolean("biometricEnabled", false))
                 .apply();
 
         return imported;
@@ -588,15 +589,26 @@ public class AppRepository {
     // ── PackageManager hidden API (reflection) ──────────────────────────
 
     /**
-     * Call {@code PackageManager.setApplicationHiddenSetting(String, boolean)}
-     * via reflection.  This hidden API is available to platform-signed apps
-     * with the {@code MANAGE_USERS} permission.
+     * Call {@code IPackageManager.setApplicationHiddenSettingAsUser()} via
+     * reflection through the binder service.  This hidden API is available
+     * to platform-signed apps with the {@code MANAGE_USERS} permission.
      */
-    private void setApplicationHiddenSetting(String packageName, boolean hidden) {
+    public static void setApplicationHiddenSetting(String packageName, boolean hidden) {
         try {
-            Method m = PackageManager.class.getMethod(
-                    "setApplicationHiddenSetting", String.class, boolean.class);
-            m.invoke(pm, packageName, hidden);
+            // Get IPackageManager via ServiceManager
+            Class<?> smClass = Class.forName("android.os.ServiceManager");
+            Method getService = smClass.getMethod("getService", String.class);
+            IBinder binder = (IBinder) getService.invoke(null, "package");
+
+            Class<?> stubClass = Class.forName("android.content.pm.IPackageManager$Stub");
+            Method asInterface = stubClass.getMethod("asInterface", IBinder.class);
+            Object ipm = asInterface.invoke(null, binder);
+
+            int userId = android.os.Process.myUserHandle().hashCode();
+            Method setHidden = ipm.getClass().getMethod(
+                    "setApplicationHiddenSettingAsUser",
+                    String.class, boolean.class, int.class);
+            setHidden.invoke(ipm, packageName, hidden, userId);
         } catch (Exception e) {
             throw new RuntimeException(
                     "setApplicationHiddenSetting failed for " + packageName, e);

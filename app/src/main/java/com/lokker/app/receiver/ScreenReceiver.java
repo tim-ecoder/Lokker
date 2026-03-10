@@ -3,13 +3,12 @@ package com.lokker.app.receiver;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.util.Log;
 
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.concurrent.Executors;
 
@@ -53,14 +52,9 @@ public class ScreenReceiver extends BroadcastReceiver {
             return;
         }
 
-        PackageManager pm = context.getPackageManager();
-
         for (LokkerApp app : hiddenApps) {
             try {
-                Method setHidden = pm.getClass().getMethod(
-                        "setApplicationHiddenSetting",
-                        String.class, boolean.class);
-                setHidden.invoke(pm, app.packageName, true);
+                AppRepository.setApplicationHiddenSetting(app.packageName, true);
             } catch (Exception e) {
                 Log.e(TAG, "Failed to re-verify hidden state for " + app.packageName, e);
             }

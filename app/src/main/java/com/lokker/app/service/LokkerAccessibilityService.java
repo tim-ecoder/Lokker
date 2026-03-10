@@ -7,15 +7,18 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.media.AudioAttributes;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
-import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 import com.lokker.app.domain.HotkeyManager;
 import com.lokker.app.ui.AuthActivity;
 
@@ -24,10 +27,11 @@ import com.lokker.app.receiver.ScreenReceiver;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Accessibility service that provides two core capabilities for Lokker:
@@ -54,18 +58,36 @@ public class LokkerAccessibilityService extends AccessibilityService {
     private static final String TAG = "LokkerA11yService";
     private static final String LOKKER_PACKAGE = "com.lokker.app";
 
+    /** Callback for hotkey recording mode. */
+    public interface KeyRecordListener {
+        void onKeyRecorded(int keyCode);
+    }
+
+    private static volatile KeyRecordListener recordListener;
+    private static volatile HotkeyManager activeHotkeyManager;
+
+    public static void startRecording(KeyRecordListener listener) {
+        recordListener = listener;
+        // Clear the hotkey buffer so partial matches from before recording
+        // don't carry over after recording stops.
+        HotkeyManager mgr = activeHotkeyManager;
+        if (mgr != null) mgr.clearBuffer();
+    }
+
+    public static void stopRecording() {
+        recordListener = null;
+        HotkeyManager mgr = activeHotkeyManager;
+        if (mgr != null) mgr.clearBuffer();
+    }
+
     /** The package name currently in the foreground. */
     private String currentForegroundPkg;
 
-    /**
-     * Set of package names that have been temporarily unhidden and must be
-     * re-hidden as soon as the user navigates away from them.
-     */
-    private final Set<String> pendingRehide = ConcurrentHashMap.newKeySet();
-
+    private AppRepository repo;
     private HotkeyManager hotkeyManager;
     private LokkerDatabase db;
     private ExecutorService executor;
+    private ScheduledExecutorService scheduler;
     private BroadcastReceiver screenReceiver;
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -76,8 +98,11 @@ public class LokkerAccessibilityService extends AccessibilityService {
         Log.i(TAG, "Accessibility service connected");
 
         db = LokkerDatabase.getInstance(this);
+        repo = AppRepository.getInstance(this);
         hotkeyManager = new HotkeyManager(db.hotkeyMapDao(), db.lokkerAppDao());
+        activeHotkeyManager = hotkeyManager;
         executor = Executors.newSingleThreadExecutor();
+        scheduler = Executors.newSingleThreadScheduledExecutor();
 
         // Ensure we receive key events
         AccessibilityServiceInfo info = getServiceInfo();
@@ -89,7 +114,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
         // Register ScreenReceiver dynamically (SCREEN_ON cannot be in manifest)
         screenReceiver = new ScreenReceiver();
         IntentFilter screenFilter = new IntentFilter(Intent.ACTION_SCREEN_ON);
-        registerReceiver(screenReceiver, screenFilter);
+        registerReceiver(screenReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED);
 
         // Try to register TaskStackListener via reflection for richer
         // task-change callbacks (works on Android 9+ with system-level
@@ -100,11 +125,15 @@ public class LokkerAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        activeHotkeyManager = null;
         if (screenReceiver != null) {
             try { unregisterReceiver(screenReceiver); } catch (Exception ignored) {}
         }
         if (executor != null && !executor.isShutdown()) {
             executor.shutdown();
+        }
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdown();
         }
         Log.i(TAG, "Accessibility service destroyed");
     }
@@ -134,10 +163,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
             // If the user navigated away from a temporarily-unhidden app,
             // re-hide it immediately and scrub it from recents.
-            if (previousPkg != null && pendingRehide.contains(previousPkg)) {
-                pendingRehide.remove(previousPkg);
+            if (previousPkg != null && repo.isPendingRehide(previousPkg)) {
                 executor.execute(() -> {
-                    rehideApp(previousPkg);
+                    repo.rehideApp(previousPkg);
                     removeFromRecents(previousPkg);
                 });
             }
@@ -151,25 +179,91 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
     // ── Key event handling (hotkeys) ────────────────────────────────────
 
+    /** Threshold for distinguishing a tap from a long press. */
+    private static final long LONG_PRESS_MS = 500;
+
+    private volatile ScheduledFuture<?> pendingLongPress;
+    private int lastKeyDown = -1;
+
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
-        if (event == null || event.getAction() != KeyEvent.ACTION_DOWN) {
+        if (event == null) return super.onKeyEvent(event);
+
+        int keyCode = event.getKeyCode();
+
+        // ── ACTION_UP → cancel long-press timer (it was a short tap) ─────
+        if (event.getAction() == KeyEvent.ACTION_UP) {
+            if (keyCode == lastKeyDown && pendingLongPress != null) {
+                pendingLongPress.cancel(false);
+                pendingLongPress = null;
+                lastKeyDown = -1;
+            }
             return super.onKeyEvent(event);
         }
 
-        hotkeyManager.onKeyDown(event.getKeyCode(), SystemClock.elapsedRealtime());
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            return super.onKeyEvent(event);
+        }
 
-        // Check hotkeys on a background thread to avoid blocking key dispatch.
-        // We snapshot the buffer so the check is consistent.
+        // If the same key arrives again (repeat/held), ignore it —
+        // let the pending long-press timer continue undisturbed.
+        if (keyCode == lastKeyDown && pendingLongPress != null) {
+            KeyRecordListener listener = recordListener;
+            return listener != null; // consume if recording
+        }
+
+        // Different key: cancel any pending long-press from previous key
+        ScheduledFuture<?> pending = pendingLongPress;
+        if (pending != null) {
+            pending.cancel(false);
+            pendingLongPress = null;
+        }
+        lastKeyDown = keyCode;
+
+        // ── Recording mode ───────────────────────────────────────────────
+        KeyRecordListener listener = recordListener;
+        if (listener != null) {
+            listener.onKeyRecorded(keyCode);
+            // Schedule long-press upgrade
+            pendingLongPress = scheduler.schedule(() -> {
+                Log.d(TAG, "Long press detected (recording) for keyCode=" + keyCode);
+                vibrateTick(); // always vibrate during recording to confirm long press
+                listener.onKeyRecorded(-keyCode);
+            }, LONG_PRESS_MS, TimeUnit.MILLISECONDS);
+            return true;
+        }
+
+        // ── Normal hotkey mode ───────────────────────────────────────────
+        hotkeyManager.onKeyDown(keyCode, SystemClock.elapsedRealtime());
         List<Integer> bufferSnapshot = hotkeyManager.getBuffer();
 
         executor.execute(() -> {
             try {
+                if (isBufferHotkeyPrefix(bufferSnapshot)) {
+                    vibrateTick();
+                }
                 checkHotkeys(bufferSnapshot);
             } catch (Exception e) {
                 Log.e(TAG, "Error checking hotkeys", e);
             }
         });
+
+        // Schedule long-press upgrade
+        pendingLongPress = scheduler.schedule(() -> {
+            Log.d(TAG, "Long press detected (hotkey) for keyCode=" + keyCode);
+            hotkeyManager.upgradeLongPress(keyCode);
+            List<Integer> snapshot = hotkeyManager.getBuffer();
+            executor.execute(() -> {
+                try {
+                    if (isBufferHotkeyPrefix(snapshot)) {
+                        vibrateTick();
+                    }
+                    checkHotkeys(snapshot);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error checking hotkeys", e);
+                }
+            });
+        }, LONG_PRESS_MS, TimeUnit.MILLISECONDS);
 
         return super.onKeyEvent(event);
     }
@@ -181,6 +275,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
      *               was pressed.
      */
     private void checkHotkeys(List<Integer> buffer) {
+        // If recording started between snapshot and execution, skip matching.
+        if (recordListener != null) return;
+
         HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
 
         // 1. Check the Lokker hotkey (opens AuthActivity with no target).
@@ -206,29 +303,41 @@ public class LokkerAccessibilityService extends AccessibilityService {
         }
     }
 
+    /**
+     * Check if the buffer is a prefix (or full match) of any configured hotkey.
+     */
+    private boolean isBufferHotkeyPrefix(List<Integer> buffer) {
+        if (buffer == null || buffer.isEmpty()) return false;
+
+        HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
+
+        List<Integer> lokkerHotkey = config.getLokkerHotkey();
+        if (lokkerHotkey != null && isPrefix(buffer, lokkerHotkey)) return true;
+
+        for (List<Integer> seq : config.getAppHotkeys().values()) {
+            if (seq != null && isPrefix(buffer, seq)) return true;
+        }
+        return false;
+    }
+
+    /** True if buffer ends with a prefix (or full match) of target sequence. */
+    private static boolean isPrefix(List<Integer> buffer, List<Integer> target) {
+        // Check if the last N elements of buffer match the first N of target
+        int len = Math.min(buffer.size(), target.size());
+        for (int i = 0; i < len; i++) {
+            if (!buffer.get(buffer.size() - len + i).equals(target.get(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ── App hiding / recents ────────────────────────────────────────────
 
     /**
      * Re-hide a temporarily-unhidden app using the hidden
      * {@code PackageManager.setApplicationHiddenSetting} API via reflection.
      */
-    private void rehideApp(String packageName) {
-        try {
-            PackageManager pm = getPackageManager();
-            Method setHidden = pm.getClass().getMethod(
-                    "setApplicationHiddenSetting",
-                    String.class, boolean.class);
-            setHidden.invoke(pm, packageName, true);
-
-            // Update database to reflect the hidden state
-            db.lokkerAppDao().setHidden(packageName, true);
-
-            Log.d(TAG, "Re-hid app: " + packageName);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to re-hide app: " + packageName, e);
-        }
-    }
-
     /**
      * Remove all tasks belonging to the given package from the recent-apps
      * list so that no trace remains after re-hiding.
@@ -371,18 +480,37 @@ public class LokkerAccessibilityService extends AccessibilityService {
         }
     }
 
-    // ── Public API for other components ─────────────────────────────────
+    // ── Vibration ─────────────────────────────────────────────────────
 
-    /**
-     * Mark a package as pending re-hide.  Called by {@code AppRepository}
-     * (or similar) after temporarily unhiding an app for the user.
-     * The service will automatically re-hide it when the user navigates
-     * away.
-     */
-    public void addPendingRehide(String packageName) {
-        pendingRehide.add(packageName);
-        Log.d(TAG, "Added to pendingRehide: " + packageName);
+    private static final AudioAttributes VIBRATE_ATTRS = new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build();
+
+    private void vibrateTick() {
+        try {
+            Vibrator v;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                VibratorManager vm = (VibratorManager) getApplicationContext()
+                        .getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                v = (vm != null) ? vm.getDefaultVibrator() : null;
+            } else {
+                v = (Vibrator) getApplicationContext()
+                        .getSystemService(Context.VIBRATOR_SERVICE);
+            }
+            if (v == null || !v.hasVibrator()) {
+                Log.w(TAG, "No vibrator available");
+                return;
+            }
+            v.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE),
+                    VIBRATE_ATTRS);
+            Log.d(TAG, "Vibrate called with USAGE_ALARM attrs");
+        } catch (Exception e) {
+            Log.w(TAG, "Vibration failed", e);
+        }
     }
+
+    // ── Public API for other components ─────────────────────────────────
 
     /**
      * @return the package name currently detected in the foreground,

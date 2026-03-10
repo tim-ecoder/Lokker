@@ -26,6 +26,7 @@ import com.lokker.app.data.db.Converters;
 import com.lokker.app.data.db.HotkeyMap;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.service.LokkerAccessibilityService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,10 +55,13 @@ public class HotkeySetupActivity extends AppCompatActivity {
     private boolean isRecording;
     private CountDownTimer recordTimer;
 
+    private String targetPackage;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         db = LokkerDatabase.getInstance(this);
+        targetPackage = getIntent().getStringExtra("target_package");
         rootView = buildUi();
         setContentView(rootView);
         loadData();
@@ -67,6 +71,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
 
     private View buildUi() {
         LinearLayout outer = new LinearLayout(this);
+        outer.setFitsSystemWindows(true);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
 
@@ -158,6 +163,17 @@ public class HotkeySetupActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 updateLokkerBadges(lokkerHotkey);
                 populateAppHotkeys(hiddenApps);
+
+                // If launched from context menu for a specific app, open its recorder
+                if (targetPackage != null && hiddenApps != null) {
+                    for (LokkerApp app : hiddenApps) {
+                        if (targetPackage.equals(app.packageName)) {
+                            targetPackage = null; // only once
+                            showAppHotkeyBottomSheet(app);
+                            break;
+                        }
+                    }
+                }
             });
         }).start();
     }
@@ -260,48 +276,83 @@ public class HotkeySetupActivity extends AppCompatActivity {
 
     // ── Recording ───────────────────────────────────────────────────────
 
+    private final List<Integer> recordedKeys = new ArrayList<>();
+
     private void startLokkerRecording(MaterialButton btn) {
         if (isRecording) return;
         isRecording = true;
+        recordedKeys.clear();
         btn.setEnabled(false);
         btn.setText(R.string.hotkey_recording);
 
-        recordTimer = new CountDownTimer(3000, 100) {
+        LokkerAccessibilityService.startRecording(keyCode -> runOnUiThread(() -> {
+            if (keyCode < 0) {
+                // Long press upgrade: replace last matching tap
+                int normalKey = -keyCode;
+                if (!recordedKeys.isEmpty()
+                        && recordedKeys.get(recordedKeys.size() - 1) == normalKey) {
+                    recordedKeys.set(recordedKeys.size() - 1, keyCode);
+                }
+            } else {
+                recordedKeys.add(keyCode);
+            }
+            btn.setText(getString(R.string.hotkey_recording) + " (" + recordedKeys.size() + ")");
+
+            // Reset the finish timer on each key press
+            if (recordTimer != null) recordTimer.cancel();
+            recordTimer = new CountDownTimer(1500, 1500) {
+                @Override public void onTick(long ms) {}
+                @Override
+                public void onFinish() {
+                    finishLokkerRecording(btn);
+                }
+            }.start();
+        }));
+
+        // Timeout if no keys pressed within 5 seconds
+        recordTimer = new CountDownTimer(5000, 100) {
             @Override
             public void onTick(long millisUntilFinished) {
-                // Recording indicator - pulse button text
                 int secs = (int) Math.ceil(millisUntilFinished / 1000.0);
                 btn.setText(getString(R.string.hotkey_recording) + " " + secs);
             }
-
             @Override
             public void onFinish() {
-                isRecording = false;
-                btn.setEnabled(true);
-                btn.setText(R.string.hotkey_recording);
-
-                // Simulated result: save a sample hotkey sequence
-                // In production, the accessibility service captures real key events.
-                List<Integer> simulated = new ArrayList<>();
-                simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
-                simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
-                simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_UP);
-
-                new Thread(() -> {
-                    HotkeyMap map = db.hotkeyMapDao().get();
-                    if (map == null) {
-                        map = new HotkeyMap();
-                    }
-                    map.lokkerHotkey = simulated;
-                    db.hotkeyMapDao().insertOrUpdate(map);
-                    runOnUiThread(() -> {
-                        updateLokkerBadges(simulated);
-                        Snackbar.make(rootView, R.string.hotkey_saved,
-                                Snackbar.LENGTH_SHORT).show();
-                    });
-                }).start();
+                finishLokkerRecording(btn);
             }
         }.start();
+    }
+
+    private void finishLokkerRecording(MaterialButton btn) {
+        LokkerAccessibilityService.stopRecording();
+        isRecording = false;
+        btn.setEnabled(true);
+        btn.setText(R.string.hotkey_record_hint);
+
+        if (recordedKeys.isEmpty()) {
+            Snackbar.make(rootView, R.string.hotkey_not_set, Snackbar.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<Integer> captured = new ArrayList<>(recordedKeys);
+        new Thread(() -> {
+            String conflict = checkHotkeyConflict(captured, "lokker");
+            if (conflict != null) {
+                runOnUiThread(() -> Snackbar.make(rootView,
+                        getString(R.string.hotkey_conflict, conflict),
+                        Snackbar.LENGTH_LONG).show());
+                return;
+            }
+            HotkeyMap map = db.hotkeyMapDao().get();
+            if (map == null) map = new HotkeyMap();
+            map.lokkerHotkey = captured;
+            db.hotkeyMapDao().insertOrUpdate(map);
+            runOnUiThread(() -> {
+                updateLokkerBadges(captured);
+                Snackbar.make(rootView, R.string.hotkey_saved,
+                        Snackbar.LENGTH_SHORT).show();
+            });
+        }).start();
     }
 
     private void showAppHotkeyBottomSheet(LokkerApp app) {
@@ -365,41 +416,60 @@ public class HotkeySetupActivity extends AppCompatActivity {
         rbLp.topMargin = dp(8);
         sheet.addView(recordBtn, rbLp);
 
+        final CountDownTimer[] sheetTimer = {null};
+        final List<Integer> appRecordedKeys = new ArrayList<>();
+        dialog.setOnDismissListener(d -> {
+            LokkerAccessibilityService.stopRecording();
+            if (sheetTimer[0] != null) {
+                sheetTimer[0].cancel();
+            }
+        });
+
         recordBtn.setOnClickListener(v -> {
             recordBtn.setEnabled(false);
+            appRecordedKeys.clear();
             recordingLabel.setVisibility(View.VISIBLE);
             recordingLabel.setText(R.string.hotkey_recording);
 
-            new CountDownTimer(3000, 100) {
+            LokkerAccessibilityService.startRecording(keyCode -> runOnUiThread(() -> {
+                if (keyCode < 0) {
+                    int normalKey = -keyCode;
+                    if (!appRecordedKeys.isEmpty()
+                            && appRecordedKeys.get(appRecordedKeys.size() - 1) == normalKey) {
+                        appRecordedKeys.set(appRecordedKeys.size() - 1, keyCode);
+                    }
+                } else {
+                    appRecordedKeys.add(keyCode);
+                }
+                recordingLabel.setText(getString(R.string.hotkey_recording)
+                        + " (" + appRecordedKeys.size() + ")");
+
+                // Reset the finish timer on each key press
+                if (sheetTimer[0] != null) sheetTimer[0].cancel();
+                sheetTimer[0] = new CountDownTimer(1500, 1500) {
+                    @Override public void onTick(long ms) {}
+                    @Override
+                    public void onFinish() {
+                        finishAppRecording(app, dialog, recordBtn,
+                                recordingLabel, appRecordedKeys);
+                    }
+                }.start();
+            }));
+
+            // Timeout if no keys within 5 seconds
+            sheetTimer[0] = new CountDownTimer(5000, 100) {
                 @Override
                 public void onTick(long millisUntilFinished) {
-                    int secs = (int) Math.ceil(millisUntilFinished / 1000.0);
-                    recordingLabel.setText(
-                            getString(R.string.hotkey_recording) + " " + secs);
+                    if (appRecordedKeys.isEmpty()) {
+                        int secs = (int) Math.ceil(millisUntilFinished / 1000.0);
+                        recordingLabel.setText(
+                                getString(R.string.hotkey_recording) + " " + secs);
+                    }
                 }
-
                 @Override
                 public void onFinish() {
-                    recordBtn.setEnabled(true);
-                    recordingLabel.setVisibility(View.GONE);
-
-                    // Simulated key sequence for this app
-                    List<Integer> simulated = new ArrayList<>();
-                    simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_UP);
-                    simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_UP);
-                    simulated.add(android.view.KeyEvent.KEYCODE_VOLUME_DOWN);
-
-                    String hotkeyJson = Converters.fromIntList(simulated);
-                    new Thread(() -> {
-                        db.lokkerAppDao().setHotkey(app.packageName, hotkeyJson);
-                        runOnUiThread(() -> {
-                            Snackbar.make(rootView,
-                                    getString(R.string.hotkey_app_saved, app.appLabel),
-                                    Snackbar.LENGTH_SHORT).show();
-                            dialog.dismiss();
-                            loadData(); // refresh list
-                        });
-                    }).start();
+                    finishAppRecording(app, dialog, recordBtn,
+                            recordingLabel, appRecordedKeys);
                 }
             }.start();
         });
@@ -408,12 +478,89 @@ public class HotkeySetupActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    private void finishAppRecording(LokkerApp app, BottomSheetDialog dialog,
+                                    MaterialButton recordBtn, TextView recordingLabel,
+                                    List<Integer> keys) {
+        LokkerAccessibilityService.stopRecording();
+        recordBtn.setEnabled(true);
+        recordingLabel.setVisibility(View.GONE);
+
+        if (keys.isEmpty()) {
+            Snackbar.make(rootView, R.string.hotkey_not_set, Snackbar.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<Integer> captured = new ArrayList<>(keys);
+        new Thread(() -> {
+            String conflict = checkHotkeyConflict(captured, app.packageName);
+            if (conflict != null) {
+                runOnUiThread(() -> Snackbar.make(rootView,
+                        getString(R.string.hotkey_conflict, conflict),
+                        Snackbar.LENGTH_LONG).show());
+                return;
+            }
+            String hotkeyJson = Converters.fromIntList(captured);
+            db.lokkerAppDao().setHotkey(app.packageName, hotkeyJson);
+            runOnUiThread(() -> {
+                Snackbar.make(rootView,
+                        getString(R.string.hotkey_app_saved, app.appLabel),
+                        Snackbar.LENGTH_SHORT).show();
+                dialog.dismiss();
+                loadData();
+            });
+        }).start();
+    }
+
+    // ── Conflict checking ─────────────────────────────────────────────
+
+    /**
+     * Check if the given hotkey sequence conflicts with any existing hotkey.
+     *
+     * @param sequence      the recorded key sequence.
+     * @param excludeTarget {@code "lokker"} to exclude the Lokker hotkey from
+     *                      the check, or a package name to exclude that app's
+     *                      hotkey, or {@code null} to check everything.
+     * @return a human-readable name of the conflicting assignment, or
+     *         {@code null} if no conflict.
+     */
+    private String checkHotkeyConflict(List<Integer> sequence, String excludeTarget) {
+        // Check Lokker hotkey
+        if (!"lokker".equals(excludeTarget)) {
+            HotkeyMap map = db.hotkeyMapDao().get();
+            if (map != null && map.lokkerHotkey != null
+                    && map.lokkerHotkey.equals(sequence)) {
+                return getString(R.string.section_lokker_hotkey);
+            }
+        }
+
+        // Check per-app hotkeys
+        List<LokkerApp> apps = db.lokkerAppDao().getAll();
+        if (apps != null) {
+            for (LokkerApp app : apps) {
+                if (app.packageName.equals(excludeTarget)) continue;
+                if (app.hotkeySequence != null
+                        && app.hotkeySequence.equals(sequence)) {
+                    return app.appLabel != null ? app.appLabel : app.packageName;
+                }
+            }
+        }
+
+        return null;
+    }
+
     // ── Key badge widget ────────────────────────────────────────────────
 
     private View createKeyBadge(int keyCode) {
         TextView badge = new TextView(this);
-        badge.setText(android.view.KeyEvent.keyCodeToString(keyCode)
-                .replace("KEYCODE_", ""));
+        String name;
+        if (keyCode < 0) {
+            name = "LONG " + android.view.KeyEvent.keyCodeToString(-keyCode)
+                    .replace("KEYCODE_", "");
+        } else {
+            name = android.view.KeyEvent.keyCodeToString(keyCode)
+                    .replace("KEYCODE_", "");
+        }
+        badge.setText(name);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         badge.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         badge.setTextColor(getResColor(R.color.colorOnSurface));
@@ -436,8 +583,15 @@ public class HotkeySetupActivity extends AppCompatActivity {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < keyCodes.size(); i++) {
             if (i > 0) sb.append(" + ");
-            sb.append(android.view.KeyEvent.keyCodeToString(keyCodes.get(i))
-                    .replace("KEYCODE_", ""));
+            int kc = keyCodes.get(i);
+            if (kc < 0) {
+                sb.append("LONG ");
+                sb.append(android.view.KeyEvent.keyCodeToString(-kc)
+                        .replace("KEYCODE_", ""));
+            } else {
+                sb.append(android.view.KeyEvent.keyCodeToString(kc)
+                        .replace("KEYCODE_", ""));
+            }
         }
         return sb.toString();
     }
@@ -488,6 +642,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        LokkerAccessibilityService.stopRecording();
         if (recordTimer != null) {
             recordTimer.cancel();
         }

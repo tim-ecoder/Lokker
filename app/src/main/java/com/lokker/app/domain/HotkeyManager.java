@@ -61,6 +61,19 @@ public class HotkeyManager {
     }
 
     /**
+     * Upgrade the last buffer entry from a normal tap to a long-press variant
+     * (negated key code) if it matches the given {@code keyCode}.
+     */
+    public void upgradeLongPress(int keyCode) {
+        if (!buffer.isEmpty()) {
+            int lastIdx = buffer.size() - 1;
+            if (buffer.get(lastIdx) == keyCode) {
+                buffer.set(lastIdx, -keyCode);
+            }
+        }
+    }
+
+    /**
      * @return an unmodifiable snapshot of the current key-code buffer.
      */
     public List<Integer> getBuffer() {

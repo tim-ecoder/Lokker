@@ -2,8 +2,11 @@ package com.lokker.app.ui;
 
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.Editable;
@@ -35,7 +38,10 @@ import com.google.android.material.snackbar.Snackbar;
 import com.lokker.app.R;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
+import com.lokker.app.domain.AuthManager;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -57,11 +63,16 @@ import java.util.Locale;
  */
 public class MainActivity extends AppCompatActivity {
 
+    private static final int REQUEST_AUTH = 100;
+
     private RecyclerView recyclerView;
     private LinearLayout emptyState;
     private View rootView;
     private AppAdapter adapter;
     private LokkerDatabase db;
+    private String currentSearchQuery = "";
+    private boolean authenticated;
+    private boolean waitingForAuth;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,10 +96,59 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        waitingForAuth = false;
+
+        // Check if AuthActivity already authenticated us (hotkey path)
+        if (!authenticated && getIntent().getBooleanExtra("authenticated", false)) {
+            authenticated = true;
+            getIntent().removeExtra("authenticated");
+        }
+
+        if (!authenticated) {
+            AuthManager auth = new AuthManager(
+                    com.lokker.app.data.LokkerPrefs.getInstance(this));
+            if (auth.hasPassword()) {
+                waitingForAuth = true;
+                Intent intent = new Intent(this, AuthActivity.class);
+                startActivityForResult(intent, REQUEST_AUTH);
+            } else {
+                authenticated = true;
+            }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Reset so next resume requires re-auth, but not while
+        // AuthActivity is on top (that would cause double auth)
+        if (!waitingForAuth) {
+            authenticated = false;
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_AUTH) {
+            if (resultCode == RESULT_OK) {
+                authenticated = true;
+            } else {
+                // User didn't authenticate — close the app
+                finish();
+            }
+        }
+    }
+
     // ── UI construction ─────────────────────────────────────────────────
 
     private View buildUi() {
         FrameLayout frame = new FrameLayout(this);
+        frame.setFitsSystemWindows(true);
         frame.setBackgroundColor(getColorAttr(android.R.attr.colorBackground));
 
         LinearLayout root = new LinearLayout(this);
@@ -142,7 +202,8 @@ public class MainActivity extends AppCompatActivity {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                adapter.filter(s.toString());
+                currentSearchQuery = s.toString();
+                adapter.filter(currentSearchQuery);
             }
             @Override
             public void afterTextChanged(Editable s) {}
@@ -212,6 +273,11 @@ public class MainActivity extends AppCompatActivity {
         Snackbar.make(rootView,
                 getString(R.string.launching_msg, app.appLabel),
                 Snackbar.LENGTH_SHORT).show();
+        new Thread(() -> {
+            AppRepository repo = AppRepository.getInstance(this);
+            repo.unhideTemporarily(app.packageName);
+            repo.launchHiddenApp(app.packageName);
+        }).start();
     }
 
     private void showContextMenu(View anchor, LokkerApp app) {
@@ -242,8 +308,7 @@ public class MainActivity extends AppCompatActivity {
                 .setMessage(getString(R.string.remove_confirm_msg, app.appLabel))
                 .setPositiveButton(R.string.confirm, (dialog, which) -> {
                     new Thread(() -> {
-                        db.lokkerAppDao().setHidden(app.packageName, false);
-                        db.lokkerAppDao().delete(app.packageName);
+                        AppRepository.getInstance(this).removeApplication(app.packageName);
                         runOnUiThread(() ->
                             Snackbar.make(rootView,
                                     getString(R.string.removed_msg, app.appLabel),
@@ -264,7 +329,7 @@ public class MainActivity extends AppCompatActivity {
 
         void submitList(List<LokkerApp> apps) {
             allApps = apps != null ? new ArrayList<>(apps) : new ArrayList<>();
-            filter("");
+            filter(currentSearchQuery);
         }
 
         void filter(String query) {
@@ -340,13 +405,23 @@ public class MainActivity extends AppCompatActivity {
             holder.label.setText(app.appLabel != null ? app.appLabel : app.packageName);
             holder.pkg.setText(app.packageName);
 
-            // Load app icon
-            try {
-                Drawable appIcon = getPackageManager()
-                        .getApplicationIcon(app.packageName);
-                holder.icon.setImageDrawable(appIcon);
-            } catch (PackageManager.NameNotFoundException e) {
-                holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+            // Load app icon — try cached icon first (hidden apps are invisible to PM)
+            File iconFile = new File(getFilesDir(), "icons/" + app.packageName + ".png");
+            if (iconFile.exists()) {
+                Bitmap bmp = BitmapFactory.decodeFile(iconFile.getAbsolutePath());
+                if (bmp != null) {
+                    holder.icon.setImageDrawable(new BitmapDrawable(getResources(), bmp));
+                } else {
+                    holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                }
+            } else {
+                try {
+                    Drawable appIcon = getPackageManager()
+                            .getApplicationIcon(app.packageName);
+                    holder.icon.setImageDrawable(appIcon);
+                } catch (PackageManager.NameNotFoundException e) {
+                    holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                }
             }
 
             holder.itemView.setOnClickListener(v -> onAppClick(app));

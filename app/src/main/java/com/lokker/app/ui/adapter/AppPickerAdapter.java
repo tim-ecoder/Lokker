@@ -119,6 +119,9 @@ public class AppPickerAdapter extends RecyclerView.Adapter<AppPickerAdapter.Pick
                 appIcon.setImageResource(android.R.drawable.sym_def_app_icon);
             }
 
+            // Remove old listener before setting checked state to avoid spurious toggles
+            checkbox.setOnCheckedChangeListener(null);
+
             if (app.alreadyHidden) {
                 itemView.setAlpha(0.5f);
                 checkbox.setEnabled(false);
@@ -131,9 +134,6 @@ public class AppPickerAdapter extends RecyclerView.Adapter<AppPickerAdapter.Pick
                 hiddenLabel.setVisibility(View.GONE);
             }
 
-            // Remove old listener before setting checked state to avoid spurious toggles
-            checkbox.setOnCheckedChangeListener(null);
-            checkbox.setChecked(app.alreadyHidden ? false : selectedPackages.contains(app.packageName));
             checkbox.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 if (app.alreadyHidden) return;
                 if (isChecked) {

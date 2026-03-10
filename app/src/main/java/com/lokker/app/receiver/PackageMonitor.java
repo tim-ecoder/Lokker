@@ -3,15 +3,14 @@ package com.lokker.app.receiver;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.util.Log;
 
 import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
+import com.lokker.app.domain.AppRepository;
 
-import java.lang.reflect.Method;
 import java.util.concurrent.Executors;
 
 /**
@@ -88,11 +87,7 @@ public class PackageMonitor extends BroadcastReceiver {
                 }
 
                 if (app.hidden) {
-                    PackageManager pm = context.getPackageManager();
-                    Method setHidden = pm.getClass().getMethod(
-                            "setApplicationHiddenSetting",
-                            String.class, boolean.class);
-                    setHidden.invoke(pm, packageName, true);
+                    AppRepository.setApplicationHiddenSetting(packageName, true);
                     Log.d(TAG, "Re-applied hidden state for updated package " + packageName);
                 }
             } catch (Exception e) {
