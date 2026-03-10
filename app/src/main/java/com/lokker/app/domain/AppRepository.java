@@ -5,7 +5,10 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
 import android.graphics.Bitmap;
@@ -230,12 +233,39 @@ public class AppRepository {
      */
     public void launchHiddenApp(String packageName) {
         Intent intent = pm.getLaunchIntentForPackage(packageName);
+
+        // If null, the launcher activity may have been left disabled — fix it
+        if (intent == null) {
+            repairDisabledLauncherActivity(packageName);
+            intent = pm.getLaunchIntentForPackage(packageName);
+        }
         if (intent == null) return;
 
         intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
         ctx.startActivity(intent);
+    }
+
+    /**
+     * Re-enable any disabled launcher activities for the given package.
+     */
+    private void repairDisabledLauncherActivity(String packageName) {
+        try {
+            Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+            launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            launcherIntent.setPackage(packageName);
+
+            List<ResolveInfo> results = pm.queryIntentActivities(launcherIntent,
+                    PackageManager.MATCH_DISABLED_COMPONENTS);
+            for (ResolveInfo ri : results) {
+                ComponentName comp = new ComponentName(ri.activityInfo.packageName,
+                        ri.activityInfo.name);
+                pm.setComponentEnabledSetting(comp,
+                        PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                        PackageManager.DONT_KILL_APP);
+            }
+        } catch (Exception ignored) {}
     }
 
     // ── Queries ─────────────────────────────────────────────────────────

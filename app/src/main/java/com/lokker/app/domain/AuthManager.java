@@ -28,7 +28,7 @@ public class AuthManager {
     private static final String KEY_LOCKOUT_UNTIL = "lockout_until";
 
     private static final int SALT_LENGTH = 16;
-    private static final int ITERATIONS = 310_000;
+    private static final int ITERATIONS = 10_000;
     private static final int KEY_LENGTH = 256;
     private static final int MAX_FAILURES = 5;
     private static final long LOCKOUT_DURATION_MS = 30_000L;
@@ -78,9 +78,19 @@ public class AuthManager {
         try {
             byte[] salt = Base64.decode(parts[0], Base64.NO_WRAP);
             byte[] storedHash = Base64.decode(parts[1], Base64.NO_WRAP);
-            byte[] inputHash = deriveKey(input, salt);
 
-            return MessageDigest.isEqual(storedHash, inputHash);
+            // Try current iteration count first
+            byte[] inputHash = deriveKey(input, salt);
+            if (MessageDigest.isEqual(storedHash, inputHash)) return true;
+
+            // Fall back to legacy 310k iterations for old hashes
+            byte[] legacyHash = deriveKey(input, salt, 310_000);
+            if (MessageDigest.isEqual(storedHash, legacyHash)) {
+                // Re-hash with new iteration count
+                setPassword(input);
+                return true;
+            }
+            return false;
         } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
             throw new RuntimeException("PBKDF2 not available", e);
         }
@@ -168,8 +178,13 @@ public class AuthManager {
 
     private byte[] deriveKey(String password, byte[] salt)
             throws NoSuchAlgorithmException, InvalidKeySpecException {
+        return deriveKey(password, salt, ITERATIONS);
+    }
+
+    private byte[] deriveKey(String password, byte[] salt, int iterations)
+            throws NoSuchAlgorithmException, InvalidKeySpecException {
         SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH);
+        KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH);
         return factory.generateSecret(spec).getEncoded();
     }
 }

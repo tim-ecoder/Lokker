@@ -96,6 +96,12 @@ public class SettingsActivity extends AppCompatActivity {
         setContentView(rootView);
     }
 
+    @Override
+    public boolean onSupportNavigateUp() {
+        finish();
+        return true;
+    }
+
     // ── UI construction ─────────────────────────────────────────────────
 
     private View buildUi() {
@@ -109,9 +115,10 @@ public class SettingsActivity extends AppCompatActivity {
         toolbar.setTitle(R.string.settings_title);
         toolbar.setTitleTextColor(getResColor(R.color.colorOnSurface));
         toolbar.setBackgroundColor(getResColor(R.color.colorSurfaceVariant));
-        toolbar.setNavigationIcon(android.R.drawable.ic_menu_revert);
-        toolbar.setNavigationOnClickListener(v -> finish());
         setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
         outer.addView(toolbar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -551,11 +558,19 @@ public class SettingsActivity extends AppCompatActivity {
                 }
 
                 int finalCount = count;
-                runOnUiThread(() ->
+                runOnUiThread(() -> {
                     Snackbar.make(rootView,
                             getString(R.string.import_success, finalCount),
-                            Snackbar.LENGTH_SHORT).show()
-                );
+                            Snackbar.LENGTH_SHORT).show();
+                    // Restart app after import to refresh all state
+                    rootView.postDelayed(() -> {
+                        Intent restart = new Intent(this, MainActivity.class);
+                        restart.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        startActivity(restart);
+                        Runtime.getRuntime().exit(0);
+                    }, 1500);
+                });
             } catch (Exception e) {
                 runOnUiThread(() ->
                     Snackbar.make(rootView, R.string.import_error,

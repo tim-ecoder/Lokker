@@ -22,6 +22,7 @@ import android.widget.GridLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -130,7 +131,7 @@ public class AuthActivity extends AppCompatActivity {
     private void buildUi() {
         DisplayMetrics dm = getResources().getDisplayMetrics();
         int screenW = dm.widthPixels;
-        int btnW = (int) (screenW / 4.0f);
+        int btnW = (int) (screenW / 4.4f);
         int btnH = dp(80);
 
         LinearLayout root = new LinearLayout(this);
@@ -476,11 +477,9 @@ public class AuthActivity extends AppCompatActivity {
                 });
             }).start();
         } else if (getCallingActivity() != null) {
-            // Launched via startActivityForResult — return OK to caller
             setResult(RESULT_OK);
             finish();
         } else {
-            // Launched directly (e.g., from hotkey or launcher)
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("authenticated", true);
             startActivity(intent);

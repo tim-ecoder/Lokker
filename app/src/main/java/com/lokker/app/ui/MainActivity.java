@@ -72,7 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private LokkerDatabase db;
     private String currentSearchQuery = "";
     private boolean authenticated;
-    private boolean waitingForAuth;
+    private boolean navigatingInternally;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -99,7 +99,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        waitingForAuth = false;
+        // Returning from internal navigation — stay authenticated
+        if (navigatingInternally) {
+            navigatingInternally = false;
+            return;
+        }
 
         // Check if AuthActivity already authenticated us (hotkey path)
         if (!authenticated && getIntent().getBooleanExtra("authenticated", false)) {
@@ -111,7 +115,7 @@ public class MainActivity extends AppCompatActivity {
             AuthManager auth = new AuthManager(
                     com.lokker.app.data.LokkerPrefs.getInstance(this));
             if (auth.hasPassword()) {
-                waitingForAuth = true;
+                navigatingInternally = true;
                 Intent intent = new Intent(this, AuthActivity.class);
                 startActivityForResult(intent, REQUEST_AUTH);
             } else {
@@ -121,11 +125,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        // Reset so next resume requires re-auth, but not while
-        // AuthActivity is on top (that would cause double auth)
-        if (!waitingForAuth) {
+    protected void onStop() {
+        super.onStop();
+        // Reset auth when actually leaving the app, not during internal navigation
+        if (!navigatingInternally) {
             authenticated = false;
         }
     }
@@ -168,6 +171,7 @@ public class MainActivity extends AppCompatActivity {
         settingsBtn.setColorFilter(getResColor(R.color.colorOnSurface));
         settingsBtn.setContentDescription(getString(R.string.settings_title));
         settingsBtn.setOnClickListener(v -> {
+            navigatingInternally = true;
             Intent intent = new Intent(this, SettingsActivity.class);
             startActivity(intent);
         });
@@ -254,6 +258,7 @@ public class MainActivity extends AppCompatActivity {
         fab.setImageResource(android.R.drawable.ic_input_add);
         fab.setContentDescription(getString(R.string.picker_title));
         fab.setOnClickListener(v -> {
+            navigatingInternally = true;
             Intent picker = new Intent(this, AppPickerDialog.class);
             startActivity(picker);
         });
@@ -286,6 +291,7 @@ public class MainActivity extends AppCompatActivity {
         popup.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
             if (id == R.id.ctx_hotkey) {
+                navigatingInternally = true;
                 Intent intent = new Intent(this, HotkeySetupActivity.class);
                 intent.putExtra("target_package", app.packageName);
                 startActivity(intent);
