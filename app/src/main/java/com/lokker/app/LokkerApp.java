@@ -23,6 +23,10 @@ public class LokkerApp extends Application {
     public void onCreate() {
         super.onCreate();
 
+        // Disable hidden API restrictions so reflection works in release builds.
+        // This app has WRITE_SECURE_SETTINGS as a system/priv-app.
+        disableHiddenApiRestrictions();
+
         // Ensure our accessibility service is enabled (requires WRITE_SECURE_SETTINGS).
         ensureAccessibilityServiceEnabled();
 
@@ -39,6 +43,16 @@ public class LokkerApp extends Application {
                 Log.e(TAG, "Failed startup recovery", e);
             }
         }).start();
+    }
+
+    private void disableHiddenApiRestrictions() {
+        try {
+            // Policy 1 = allow all hidden API access
+            Settings.Global.putInt(getContentResolver(),
+                    "hidden_api_policy", 1);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not disable hidden API restrictions", e);
+        }
     }
 
     private void ensureAccessibilityServiceEnabled() {
