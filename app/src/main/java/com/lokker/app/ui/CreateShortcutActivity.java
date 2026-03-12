@@ -75,12 +75,14 @@ public class CreateShortcutActivity extends AppCompatActivity {
         toolbar.setTitle(R.string.shortcut_picker_title);
         toolbar.setTitleTextColor(getResColor(R.color.colorOnSurface));
         toolbar.setBackgroundColor(getResColor(R.color.colorSurfaceVariant));
-        toolbar.setNavigationIcon(android.R.drawable.ic_menu_revert);
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
         toolbar.setNavigationOnClickListener(v -> {
             setResult(RESULT_CANCELED);
             finish();
         });
-        setSupportActionBar(toolbar);
         outer.addView(toolbar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -139,6 +141,8 @@ public class CreateShortcutActivity extends AppCompatActivity {
         Intent shortcutIntent = new Intent("com.lokker.app.LAUNCH_HIDDEN");
         shortcutIntent.setClassName(getPackageName(),
                 "com.lokker.app.ui.AuthActivity");
+        shortcutIntent.setData(android.net.Uri.parse(
+                "lokker://launch/" + entry.packageName));
         shortcutIntent.putExtra("target_package", entry.packageName);
         shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);

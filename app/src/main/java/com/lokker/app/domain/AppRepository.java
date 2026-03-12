@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -323,6 +324,56 @@ public class AppRepository {
     }
 
     /**
+     * Unhide every hidden package on the device, not just Lokker-managed ones.
+     * Uses IPackageManager to enumerate all installed packages (including
+     * hidden) and calls {@code setApplicationHiddenSettingAsUser(pkg, false)}.
+     */
+    public void unhideAllSystemWide() {
+        // First do the normal Lokker unhide to keep DB in sync
+        unhideAll();
+
+        // Then unhide everything else via IPackageManager
+        try {
+            Class<?> smClass = Class.forName("android.os.ServiceManager");
+            Method getService = smClass.getMethod("getService", String.class);
+            IBinder binder = (IBinder) getService.invoke(null, "package");
+
+            Class<?> stubClass = Class.forName(
+                    "android.content.pm.IPackageManager$Stub");
+            Method asInterface = stubClass.getMethod("asInterface", IBinder.class);
+            Object ipm = asInterface.invoke(null, binder);
+
+            int userId = android.os.Process.myUserHandle().hashCode();
+
+            // MATCH_UNINSTALLED_PACKAGES (0x00002000) includes hidden packages
+            Method getInstalled = ipm.getClass().getMethod(
+                    "getInstalledApplications", long.class, int.class);
+            Object slice = getInstalled.invoke(ipm, 0x00002000L, userId);
+            // ParceledListSlice is a hidden class — call getList() via reflection
+            @SuppressWarnings("unchecked")
+            List<ApplicationInfo> allApps = (List<ApplicationInfo>)
+                    slice.getClass().getMethod("getList").invoke(slice);
+
+            Method setHidden = ipm.getClass().getMethod(
+                    "setApplicationHiddenSettingAsUser",
+                    String.class, boolean.class, int.class);
+
+            int count = 0;
+            for (ApplicationInfo info : allApps) {
+                try {
+                    setHidden.invoke(ipm, info.packageName, false, userId);
+                    count++;
+                } catch (Exception ignored) {
+                    // Skip packages that can't be unhidden
+                }
+            }
+            Log.i(TAG, "unhideAllSystemWide: unhid " + count + " packages");
+        } catch (Exception e) {
+            Log.e(TAG, "unhideAllSystemWide failed", e);
+        }
+    }
+
+    /**
      * Re-hide all applications that were previously unhidden via
      * {@link #unhideAll()}.  Uses the saved snapshot; skips apps that
      * have since been removed from Lokker or uninstalled from the device.
@@ -540,6 +591,7 @@ public class AppRepository {
     private ShortcutInfo buildShortcutInfo(ShortcutManager sm, LokkerApp app) {
         Intent target = new Intent(ctx, AuthActivity.class);
         target.setAction("com.lokker.app.LAUNCH_HIDDEN");
+        target.setData(android.net.Uri.parse("lokker://launch/" + app.packageName));
         target.putExtra("target_package", app.packageName);
 
         Icon icon = loadCachedIcon(app.packageName);

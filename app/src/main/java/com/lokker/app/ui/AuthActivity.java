@@ -3,6 +3,7 @@ package com.lokker.app.ui;
 import android.animation.ObjectAnimator;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -67,6 +68,14 @@ public class AuthActivity extends AppCompatActivity {
         prefs = LokkerPrefs.getInstance(this);
         authManager = new AuthManager(prefs);
         targetPackage = getIntent().getStringExtra("target_package");
+        // Also check data URI (more reliable through PendingIntent / shortcuts)
+        if (targetPackage == null) {
+            Uri data = getIntent().getData();
+            if (data != null && "lokker".equals(data.getScheme())
+                    && "launch".equals(data.getHost())) {
+                targetPackage = data.getLastPathSegment();
+            }
+        }
 
         if (!authManager.hasPassword()) {
             proceedAfterAuth();

@@ -209,7 +209,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
         // let the pending long-press timer continue undisturbed.
         if (keyCode == lastKeyDown && pendingLongPress != null) {
             KeyRecordListener listener = recordListener;
-            return listener != null; // consume if recording
+            // Consume repeats during recording, but never consume BACK
+            return listener != null && keyCode != KeyEvent.KEYCODE_BACK;
         }
 
         // Different key: cancel any pending long-press from previous key
@@ -223,6 +224,10 @@ public class LokkerAccessibilityService extends AccessibilityService {
         // ── Recording mode ───────────────────────────────────────────────
         KeyRecordListener listener = recordListener;
         if (listener != null) {
+            // Let BACK pass through so navigation still works
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                return super.onKeyEvent(event);
+            }
             listener.onKeyRecorded(keyCode);
             // Schedule long-press upgrade
             pendingLongPress = scheduler.schedule(() -> {
@@ -401,6 +406,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
         Intent intent = new Intent(this, AuthActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (targetPackage != null) {
+            intent.setData(android.net.Uri.parse("lokker://launch/" + targetPackage));
             intent.putExtra("target_package", targetPackage);
         }
         startActivity(intent);

@@ -63,6 +63,7 @@
             <intent-filter>
                 <action android:name="com.lokker.app.LAUNCH_HIDDEN"/>
                 <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="lokker" android:host="launch"/>
             </intent-filter>
         </activity>
 
@@ -134,13 +135,21 @@
         <!-- Screen on receiver (must be registered dynamically, not via manifest) -->
         <!-- ScreenReceiver is registered in LokkerAccessibilityService.onServiceConnected() -->
 
-        <!-- Secret code receiver (*#5655#) -->
+        <!-- Secret code receiver -->
         <receiver
             android:name=".receiver.SecretCodeReceiver"
             android:exported="true">
+            <!-- *#565537# (LOKKER) — open Lokker -->
             <intent-filter>
                 <action android:name="android.provider.Telephony.SECRET_CODE"/>
-                <data android:scheme="android_secret_code" android:host="5655"/>
+                <action android:name="android.telecom.action.SECRET_CODE"/>
+                <data android:scheme="android_secret_code" android:host="565537"/>
+            </intent-filter>
+            <!-- *#5655377469# (LOKKERSHOW) — unhide all apps -->
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE"/>
+                <action android:name="android.telecom.action.SECRET_CODE"/>
+                <data android:scheme="android_secret_code" android:host="5655377469"/>
             </intent-filter>
         </receiver>
 
