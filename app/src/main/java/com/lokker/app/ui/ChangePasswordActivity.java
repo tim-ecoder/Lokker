@@ -149,8 +149,8 @@ public class ChangePasswordActivity extends AppCompatActivity {
     private EditText createPasswordField(String hint) {
         EditText field = new EditText(this);
         field.setHint(hint);
-        field.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        field.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         field.setTextColor(getResColor(R.color.colorOnSurface));
         field.setHintTextColor(getResColor(R.color.colorOnSurfaceMedium));
         field.setSingleLine(true);
@@ -164,6 +164,10 @@ public class ChangePasswordActivity extends AppCompatActivity {
 
         int p = dp(12);
         field.setPadding(p, p, p, p);
+
+        // Must be set after setBackground and setInputType
+        field.setTransformationMethod(
+                android.text.method.PasswordTransformationMethod.getInstance());
         return field;
     }
 

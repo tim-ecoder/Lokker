@@ -101,7 +101,7 @@
     <string name="confirm_password">Confirm password</string>
     <string name="confirm_new_password">Confirm new password</string>
     <string name="pw_wrong_current">Wrong current password</string>
-    <string name="pw_too_short">Password must be at least 6 characters</string>
+    <string name="pw_too_short">PIN must be at least 6 digits</string>
     <string name="pw_mismatch">Passwords don\'t match</string>
     <string name="pw_set_success">Password set</string>
     <string name="pw_change_success">Password changed successfully</string>

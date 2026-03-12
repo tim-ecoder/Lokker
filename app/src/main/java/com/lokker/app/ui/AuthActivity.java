@@ -188,17 +188,16 @@ public class AuthActivity extends AppCompatActivity {
         dotsContainer = new LinearLayout(this);
         dotsContainer.setOrientation(LinearLayout.HORIZONTAL);
         dotsContainer.setGravity(Gravity.CENTER);
-        int dotSize = dp(16);
         for (int i = 0; i < PIN_LENGTH; i++) {
-            View dot = new View(this);
-            GradientDrawable bg = new GradientDrawable();
-            bg.setShape(GradientDrawable.OVAL);
-            bg.setSize(dotSize, dotSize);
-            bg.setStroke(dp(2), getResColor(R.color.colorPrimary));
-            bg.setColor(Color.TRANSPARENT);
-            dot.setBackground(bg);
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dotSize, dotSize);
-            dlp.setMargins(dp(8), 0, dp(8), 0);
+            TextView dot = new TextView(this);
+            dot.setText("_");
+            dot.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+            dot.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            dot.setTextColor(getResColor(R.color.colorOnSurfaceMedium));
+            dot.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    dp(28), LinearLayout.LayoutParams.WRAP_CONTENT);
+            dlp.setMargins(dp(4), 0, dp(4), 0);
             dotsContainer.addView(dot, dlp);
             dotViews[i] = dot;
         }
@@ -394,18 +393,15 @@ public class AuthActivity extends AppCompatActivity {
     // ── Dots & validation ────────────────────────────────────────────────
 
     private void updateDots() {
-        int dotSize = dp(16);
         for (int i = 0; i < PIN_LENGTH; i++) {
-            GradientDrawable bg = new GradientDrawable();
-            bg.setShape(GradientDrawable.OVAL);
-            bg.setSize(dotSize, dotSize);
+            TextView tv = (TextView) dotViews[i];
             if (i < pinBuffer.length()) {
-                bg.setColor(getResColor(R.color.colorPrimary));
+                tv.setText("*");
+                tv.setTextColor(getResColor(R.color.colorPrimary));
             } else {
-                bg.setStroke(dp(2), getResColor(R.color.colorPrimary));
-                bg.setColor(Color.TRANSPARENT);
+                tv.setText("_");
+                tv.setTextColor(getResColor(R.color.colorOnSurfaceMedium));
             }
-            dotViews[i].setBackground(bg);
         }
     }
 

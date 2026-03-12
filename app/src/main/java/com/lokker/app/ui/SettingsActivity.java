@@ -62,6 +62,13 @@ public class SettingsActivity extends AppCompatActivity {
         setContentView(rootView);
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Refresh UI to reflect changes (e.g. password set/changed)
+        rootView = buildUi();
+        setContentView(rootView);
+    }
 
     // ── UI construction ─────────────────────────────────────────────────
 
