@@ -162,7 +162,6 @@ public class MainActivity extends AppCompatActivity {
         toolbar.setTitle(R.string.app_name);
         toolbar.setTitleTextColor(getResColor(R.color.colorOnSurface));
         toolbar.setBackgroundColor(getResColor(R.color.colorSurfaceVariant));
-        setSupportActionBar(toolbar);
 
         // Settings gear icon
         ImageButton settingsBtn = new ImageButton(this);

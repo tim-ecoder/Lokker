@@ -75,10 +75,7 @@ public class CreateShortcutActivity extends AppCompatActivity {
         toolbar.setTitle(R.string.shortcut_picker_title);
         toolbar.setTitleTextColor(getResColor(R.color.colorOnSurface));
         toolbar.setBackgroundColor(getResColor(R.color.colorSurfaceVariant));
-        setSupportActionBar(toolbar);
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        }
+        toolbar.setNavigationIcon(android.R.drawable.ic_menu_revert);
         toolbar.setNavigationOnClickListener(v -> {
             setResult(RESULT_CANCELED);
             finish();

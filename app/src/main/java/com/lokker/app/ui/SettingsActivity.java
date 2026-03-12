@@ -62,11 +62,6 @@ public class SettingsActivity extends AppCompatActivity {
         setContentView(rootView);
     }
 
-    @Override
-    public boolean onSupportNavigateUp() {
-        finish();
-        return true;
-    }
 
     // ── UI construction ─────────────────────────────────────────────────
 
@@ -81,10 +76,8 @@ public class SettingsActivity extends AppCompatActivity {
         toolbar.setTitle(R.string.settings_title);
         toolbar.setTitleTextColor(getResColor(R.color.colorOnSurface));
         toolbar.setBackgroundColor(getResColor(R.color.colorSurfaceVariant));
-        setSupportActionBar(toolbar);
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        }
+        toolbar.setNavigationIcon(android.R.drawable.ic_menu_revert);
+        toolbar.setNavigationOnClickListener(v -> finish());
         outer.addView(toolbar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
