@@ -18,7 +18,7 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.domain.AuthManager;
@@ -192,8 +192,8 @@ public class ChangePasswordActivity extends AppCompatActivity {
             String current = currentPwField.getText().toString();
             if (!authManager.verifyPassword(current)) {
                 setFieldError(currentPwField);
-                Snackbar.make(rootLayout, R.string.pw_wrong_current,
-                        Snackbar.LENGTH_SHORT).show();
+                Toast.makeText(this, R.string.pw_wrong_current,
+                        Toast.LENGTH_SHORT).show();
                 return;
             }
         }
@@ -204,25 +204,25 @@ public class ChangePasswordActivity extends AppCompatActivity {
         // Check minimum length
         if (newPw.length() < MIN_PASSWORD_LENGTH) {
             setFieldError(newPwField);
-            Snackbar.make(rootLayout, R.string.pw_too_short,
-                    Snackbar.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.pw_too_short,
+                    Toast.LENGTH_SHORT).show();
             return;
         }
 
         // Check passwords match
         if (!newPw.equals(confirmPw)) {
             setFieldError(confirmPwField);
-            Snackbar.make(rootLayout, R.string.pw_mismatch,
-                    Snackbar.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.pw_mismatch,
+                    Toast.LENGTH_SHORT).show();
             return;
         }
 
         // Save password
         authManager.setPassword(newPw);
 
-        Snackbar.make(rootLayout,
+        Toast.makeText(this,
                 isChangeMode ? R.string.pw_change_success : R.string.pw_set_success,
-                Snackbar.LENGTH_SHORT).show();
+                Toast.LENGTH_SHORT).show();
 
         setResult(RESULT_OK);
         rootLayout.postDelayed(this::finish, 800);

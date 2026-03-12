@@ -22,7 +22,7 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.biometric.BiometricManager;
 import androidx.core.content.ContextCompat;
 
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.data.db.HotkeyMap;
@@ -68,6 +68,7 @@ public class SettingsActivity extends AppCompatActivity {
         // Refresh UI to reflect changes (e.g. password set/changed)
         rootView = buildUi();
         setContentView(rootView);
+        rootView.requestApplyInsets();
     }
 
     // ── UI construction ─────────────────────────────────────────────────
@@ -113,8 +114,8 @@ public class SettingsActivity extends AppCompatActivity {
                                 if (map == null || map.lokkerHotkey == null
                                         || map.lokkerHotkey.isEmpty()) {
                                     buttonView.setChecked(false);
-                                    Snackbar.make(rootView, R.string.hotkey_required,
-                                            Snackbar.LENGTH_SHORT).show();
+                                    Toast.makeText(SettingsActivity.this, R.string.hotkey_required,
+                                            Toast.LENGTH_SHORT).show();
                                 } else {
                                     showSelfHideConfirmDialog(buttonView);
                                 }
@@ -362,9 +363,9 @@ public class SettingsActivity extends AppCompatActivity {
                        : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP);
 
-        Snackbar.make(rootView,
+        Toast.makeText(this,
                 hidden ? R.string.lokker_hidden : R.string.lokker_visible,
-                Snackbar.LENGTH_SHORT).show();
+                Toast.LENGTH_SHORT).show();
     }
 
     // ── Unhide all / Hide all ───────────────────────────────────────────
@@ -374,8 +375,8 @@ public class SettingsActivity extends AppCompatActivity {
             List<LokkerApp> hidden = db.lokkerAppDao().getAllHidden();
             runOnUiThread(() -> {
                 if (hidden == null || hidden.isEmpty()) {
-                    Snackbar.make(rootView, R.string.no_apps_to_unhide,
-                            Snackbar.LENGTH_SHORT).show();
+                    Toast.makeText(SettingsActivity.this, R.string.no_apps_to_unhide,
+                            Toast.LENGTH_SHORT).show();
                     return;
                 }
                 new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
@@ -386,8 +387,8 @@ public class SettingsActivity extends AppCompatActivity {
                                 AppRepository repo = AppRepository.getInstance(SettingsActivity.this);
                                 repo.unhideAll();
                                 runOnUiThread(() ->
-                                    Snackbar.make(rootView, R.string.all_unhidden,
-                                            Snackbar.LENGTH_SHORT).show()
+                                    Toast.makeText(SettingsActivity.this, R.string.all_unhidden,
+                                            Toast.LENGTH_SHORT).show()
                                 );
                             }).start();
                         })
@@ -406,8 +407,8 @@ public class SettingsActivity extends AppCompatActivity {
                         AppRepository repo = AppRepository.getInstance(SettingsActivity.this);
                         repo.rehideAll();
                         runOnUiThread(() ->
-                            Snackbar.make(rootView, R.string.all_hidden,
-                                    Snackbar.LENGTH_SHORT).show()
+                            Toast.makeText(SettingsActivity.this, R.string.all_hidden,
+                                    Toast.LENGTH_SHORT).show()
                         );
                     }).start();
                 })

@@ -29,7 +29,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
@@ -229,9 +229,9 @@ public class AppPickerDialog extends AppCompatActivity {
             int count = packages.size();
             String noun = getAppNoun(count);
             runOnUiThread(() -> {
-                Snackbar.make(rootView,
+                Toast.makeText(AppPickerDialog.this,
                         getString(R.string.apps_hidden_count, count, noun),
-                        Snackbar.LENGTH_SHORT).show();
+                        Toast.LENGTH_SHORT).show();
                 rootView.postDelayed(this::finish, 600);
             });
         }).start();

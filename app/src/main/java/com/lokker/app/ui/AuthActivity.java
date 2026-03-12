@@ -32,7 +32,7 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.domain.AppRepository;
@@ -427,10 +427,10 @@ public class AuthActivity extends AppCompatActivity {
                 authManager.setLockout();
                 startLockout(authManager.getLockoutRemaining());
             } else {
-                Snackbar.make(rootView,
+                Toast.makeText(AuthActivity.this,
                         getString(R.string.attempt_count, failCount,
                                 authManager.getMaxFailures()),
-                        Snackbar.LENGTH_SHORT).show();
+                        Toast.LENGTH_SHORT).show();
             }
         }
     }

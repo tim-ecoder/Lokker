@@ -34,7 +34,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
@@ -274,9 +274,9 @@ public class MainActivity extends AppCompatActivity {
     // ── App item actions ────────────────────────────────────────────────
 
     private void onAppClick(LokkerApp app) {
-        Snackbar.make(rootView,
+        Toast.makeText(this,
                 getString(R.string.launching_msg, app.appLabel),
-                Snackbar.LENGTH_SHORT).show();
+                Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             AppRepository repo = AppRepository.getInstance(this);
             repo.unhideTemporarily(app.packageName);
@@ -315,9 +315,9 @@ public class MainActivity extends AppCompatActivity {
                     new Thread(() -> {
                         AppRepository.getInstance(this).removeApplication(app.packageName);
                         runOnUiThread(() ->
-                            Snackbar.make(rootView,
+                            Toast.makeText(MainActivity.this,
                                     getString(R.string.removed_msg, app.appLabel),
-                                    Snackbar.LENGTH_SHORT).show()
+                                    Toast.LENGTH_SHORT).show()
                         );
                     }).start();
                 })

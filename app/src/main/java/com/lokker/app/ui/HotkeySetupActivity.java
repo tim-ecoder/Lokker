@@ -21,7 +21,7 @@ import androidx.core.content.ContextCompat;
 
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.snackbar.Snackbar;
+import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.db.Converters;
 import com.lokker.app.data.db.HotkeyMap;
@@ -338,7 +338,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
         btn.setText(R.string.hotkey_record_hint);
 
         if (recordedKeys.isEmpty()) {
-            Snackbar.make(rootView, R.string.hotkey_not_set, Snackbar.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.hotkey_not_set, Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -346,9 +346,9 @@ public class HotkeySetupActivity extends AppCompatActivity {
         new Thread(() -> {
             String conflict = checkHotkeyConflict(captured, "lokker");
             if (conflict != null) {
-                runOnUiThread(() -> Snackbar.make(rootView,
+                runOnUiThread(() -> Toast.makeText(HotkeySetupActivity.this,
                         getString(R.string.hotkey_conflict, conflict),
-                        Snackbar.LENGTH_LONG).show());
+                        Toast.LENGTH_LONG).show());
                 return;
             }
             HotkeyMap map = db.hotkeyMapDao().get();
@@ -357,8 +357,8 @@ public class HotkeySetupActivity extends AppCompatActivity {
             db.hotkeyMapDao().insertOrUpdate(map);
             runOnUiThread(() -> {
                 updateLokkerBadges(captured);
-                Snackbar.make(rootView, R.string.hotkey_saved,
-                        Snackbar.LENGTH_SHORT).show();
+                Toast.makeText(HotkeySetupActivity.this, R.string.hotkey_saved,
+                        Toast.LENGTH_SHORT).show();
             });
         }).start();
     }
@@ -494,7 +494,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
         recordingLabel.setVisibility(View.GONE);
 
         if (keys.isEmpty()) {
-            Snackbar.make(rootView, R.string.hotkey_not_set, Snackbar.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.hotkey_not_set, Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -502,17 +502,17 @@ public class HotkeySetupActivity extends AppCompatActivity {
         new Thread(() -> {
             String conflict = checkHotkeyConflict(captured, app.packageName);
             if (conflict != null) {
-                runOnUiThread(() -> Snackbar.make(rootView,
+                runOnUiThread(() -> Toast.makeText(HotkeySetupActivity.this,
                         getString(R.string.hotkey_conflict, conflict),
-                        Snackbar.LENGTH_LONG).show());
+                        Toast.LENGTH_LONG).show());
                 return;
             }
             String hotkeyJson = Converters.fromIntList(captured);
             db.lokkerAppDao().setHotkey(app.packageName, hotkeyJson);
             runOnUiThread(() -> {
-                Snackbar.make(rootView,
+                Toast.makeText(HotkeySetupActivity.this,
                         getString(R.string.hotkey_app_saved, app.appLabel),
-                        Snackbar.LENGTH_SHORT).show();
+                        Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
                 loadData();
             });
