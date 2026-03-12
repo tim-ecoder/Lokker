@@ -471,6 +471,8 @@ public class AuthActivity extends AppCompatActivity {
             AppRepository repo = AppRepository.getInstance(getApplicationContext());
             new Thread(() -> {
                 repo.unhideTemporarily(targetPackage);
+                // Give PackageManager time to refresh its cache after unhiding
+                try { Thread.sleep(150); } catch (InterruptedException ignored) {}
                 runOnUiThread(() -> {
                     repo.launchHiddenApp(targetPackage);
                     finish();

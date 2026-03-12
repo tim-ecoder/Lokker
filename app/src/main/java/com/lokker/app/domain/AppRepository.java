@@ -238,7 +238,10 @@ public class AppRepository {
             repairDisabledLauncherActivity(packageName);
             intent = pm.getLaunchIntentForPackage(packageName);
         }
-        if (intent == null) return;
+        if (intent == null) {
+            Log.e(TAG, "launchHiddenApp: no launch intent for " + packageName);
+            return;
+        }
 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
