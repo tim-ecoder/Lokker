@@ -94,6 +94,7 @@
     <string name="section_app_hotkeys">App hotkeys</string>
     <string name="no_hidden_apps">No hidden apps</string>
     <string name="shortcut_picker_title">Lokker: choose app</string>
+    <string name="shortcut_open_lokker">Open Lokker</string>
 
     <!-- Password -->
     <string name="current_password">Current password</string>

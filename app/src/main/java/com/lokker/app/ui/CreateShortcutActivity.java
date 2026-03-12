@@ -111,6 +111,9 @@ public class CreateShortcutActivity extends AppCompatActivity {
             List<LokkerApp> apps = db.lokkerAppDao().getAll();
             List<AppEntry> entries = new ArrayList<>();
 
+            // "Open Lokker" always first
+            entries.add(new AppEntry(null, getString(R.string.shortcut_open_lokker)));
+
             if (apps != null) {
                 for (LokkerApp app : apps) {
                     String label = app.appLabel != null ? app.appLabel : app.packageName;
@@ -120,14 +123,7 @@ public class CreateShortcutActivity extends AppCompatActivity {
 
             runOnUiThread(() -> {
                 RecyclerView recycler = findViewById(android.R.id.list);
-                TextView empty = findViewById(android.R.id.empty);
-
-                if (entries.isEmpty()) {
-                    recycler.setVisibility(View.GONE);
-                    empty.setVisibility(View.VISIBLE);
-                } else {
-                    recycler.setAdapter(new ShortcutAdapter(entries));
-                }
+                recycler.setAdapter(new ShortcutAdapter(entries));
             });
         }).start();
     }
@@ -135,30 +131,55 @@ public class CreateShortcutActivity extends AppCompatActivity {
     // ── Result ────────────────────────────────────────────────────────────
 
     private void onAppSelected(AppEntry entry) {
-        Intent shortcutIntent = new Intent("com.lokker.app.LAUNCH_HIDDEN");
-        shortcutIntent.setClassName(getPackageName(),
-                "com.lokker.app.ui.AuthActivity");
-        shortcutIntent.setData(android.net.Uri.parse(
-                "lokker://launch/" + entry.packageName));
-        shortcutIntent.putExtra("target_package", entry.packageName);
-        shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        Intent shortcutIntent;
+
+        if (entry.packageName == null) {
+            // Open Lokker itself
+            shortcutIntent = new Intent(Intent.ACTION_MAIN);
+            shortcutIntent.setClassName(getPackageName(),
+                    "com.lokker.app.ui.AuthActivity");
+            shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        } else {
+            // Launch hidden app
+            shortcutIntent = new Intent("com.lokker.app.LAUNCH_HIDDEN");
+            shortcutIntent.setClassName(getPackageName(),
+                    "com.lokker.app.ui.AuthActivity");
+            shortcutIntent.setData(android.net.Uri.parse(
+                    "lokker://launch/" + entry.packageName));
+            shortcutIntent.putExtra("target_package", entry.packageName);
+            shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            shortcutIntent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        }
 
         Intent result = new Intent();
         result.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
         result.putExtra(Intent.EXTRA_SHORTCUT_NAME, entry.label);
 
-        // Try to attach the cached icon
-        android.content.pm.ShortcutManager sm =
-                getSystemService(android.content.pm.ShortcutManager.class);
-        android.graphics.drawable.Icon icon = repo.loadCachedIcon(entry.packageName);
-        if (icon != null) {
-            result.putExtra(Intent.EXTRA_SHORTCUT_ICON,
-                    iconToBitmap(icon));
+        if (entry.packageName != null) {
+            android.graphics.drawable.Icon icon = repo.loadCachedIcon(entry.packageName);
+            if (icon != null) {
+                result.putExtra(Intent.EXTRA_SHORTCUT_ICON, iconToBitmap(icon));
+            }
+        } else {
+            // Lokker's own icon
+            try {
+                Drawable d = getPackageManager().getApplicationIcon(getPackageName());
+                result.putExtra(Intent.EXTRA_SHORTCUT_ICON, drawableToBitmap(d));
+            } catch (Exception ignored) {}
         }
 
         setResult(RESULT_OK, result);
         finish();
+    }
+
+    private android.graphics.Bitmap drawableToBitmap(Drawable d) {
+        int size = dp(48);
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                size, size, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+        d.setBounds(0, 0, size, size);
+        d.draw(canvas);
+        return bmp;
     }
 
     private android.graphics.Bitmap iconToBitmap(android.graphics.drawable.Icon icon) {
@@ -247,16 +268,26 @@ public class CreateShortcutActivity extends AppCompatActivity {
         public void onBindViewHolder(@NonNull VH holder, int position) {
             AppEntry entry = apps.get(position);
             holder.label.setText(entry.label);
-            holder.pkg.setText(entry.packageName);
 
-            // Load cached icon (app is hidden so PM won't resolve it)
-            android.graphics.drawable.Icon cachedIcon =
-                    repo.loadCachedIcon(entry.packageName);
-            if (cachedIcon != null) {
-                holder.icon.setImageDrawable(cachedIcon.loadDrawable(
-                        CreateShortcutActivity.this));
+            if (entry.packageName == null) {
+                // "Open Lokker" entry
+                holder.pkg.setText(getPackageName());
+                try {
+                    holder.icon.setImageDrawable(
+                            getPackageManager().getApplicationIcon(getPackageName()));
+                } catch (Exception e) {
+                    holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                }
             } else {
-                holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                holder.pkg.setText(entry.packageName);
+                android.graphics.drawable.Icon cachedIcon =
+                        repo.loadCachedIcon(entry.packageName);
+                if (cachedIcon != null) {
+                    holder.icon.setImageDrawable(cachedIcon.loadDrawable(
+                            CreateShortcutActivity.this));
+                } else {
+                    holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
+                }
             }
 
             holder.itemView.setOnClickListener(v -> onAppSelected(entry));
