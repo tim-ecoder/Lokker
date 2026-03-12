@@ -66,6 +66,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Shortcut provider for external remappers (KeyMapper etc.) -->
+        <activity
+            android:name=".ui.CreateShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.CREATE_SHORTCUT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
         <!-- Settings -->
         <activity
             android:name=".ui.SettingsActivity"
