@@ -236,6 +236,7 @@ public class AuthActivity extends AppCompatActivity {
         root.addView(pinInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 1));
         pinInput.addTextChangedListener(imeWatcher);
+        pinInput.requestFocus();
 
         // ── Keypad 4x3 grid ─────────────────────────────────────────────
         keypad = new GridLayout(this);
