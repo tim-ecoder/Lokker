@@ -153,8 +153,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
         String newPkg = pkgCs.toString();
 
-        // Ignore system UI noise (status bar, keyboard, etc.)
+        // Ignore system UI noise (status bar, keyboard, overlays, etc.)
         if (newPkg.equals("com.android.systemui")) return;
+        if (isInputMethod(newPkg)) return;
 
         // Detect foreground change
         if (!newPkg.equals(currentForegroundPkg)) {
@@ -170,6 +171,18 @@ public class LokkerAccessibilityService extends AccessibilityService {
                 });
             }
         }
+    }
+
+    private boolean isInputMethod(String pkg) {
+        try {
+            List<android.view.inputmethod.InputMethodInfo> imes =
+                    ((android.view.inputmethod.InputMethodManager)
+                            getSystemService(INPUT_METHOD_SERVICE)).getInputMethodList();
+            for (android.view.inputmethod.InputMethodInfo ime : imes) {
+                if (pkg.equals(ime.getPackageName())) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     @Override
