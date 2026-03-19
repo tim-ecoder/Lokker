@@ -12,6 +12,11 @@
         android:title="@string/ctx_launch" />
 
     <item
+        android:id="@+id/ctx_unhide_until_closed"
+        android:icon="@android:drawable/ic_menu_view"
+        android:title="@string/ctx_unhide_until_closed" />
+
+    <item
         android:id="@+id/ctx_remove"
         android:icon="@android:drawable/ic_menu_delete"
         android:title="@string/ctx_remove" />

@@ -27,6 +27,7 @@ import com.lokker.app.receiver.ScreenReceiver;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -88,6 +89,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
     private LokkerDatabase db;
     private ExecutorService executor;
     private ScheduledExecutorService scheduler;
+    private volatile ScheduledFuture<?> rehideOnClosePoll;
     private BroadcastReceiver screenReceiver;
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -126,6 +128,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         super.onDestroy();
         activeHotkeyManager = null;
+        if (rehideOnClosePoll != null) {
+            rehideOnClosePoll.cancel(false);
+        }
         if (screenReceiver != null) {
             try { unregisterReceiver(screenReceiver); } catch (Exception ignored) {}
         }
@@ -169,6 +174,11 @@ public class LokkerAccessibilityService extends AccessibilityService {
                     repo.rehideApp(previousPkg);
                     removeFromRecents(previousPkg);
                 });
+            }
+
+            // Check "unhide until closed" apps on foreground changes.
+            if (repo.hasPendingRehideOnClose()) {
+                executor.execute(this::checkRehideOnClose);
             }
         }
     }
@@ -353,9 +363,91 @@ public class LokkerAccessibilityService extends AccessibilityService {
     // ── App hiding / recents ────────────────────────────────────────────
 
     /**
-     * Re-hide a temporarily-unhidden app using the hidden
-     * {@code PackageManager.setApplicationHiddenSetting} API via reflection.
+     * Check whether any "unhide until closed" apps no longer have a task
+     * in the recents list (i.e. the user has closed them) and re-hide them.
+     *
+     * Also manages a periodic poll: starts a 3-second timer when there are
+     * pending apps (to catch task removal when no accessibility events fire),
+     * and cancels it when the set is empty.
      */
+    /**
+     * Must run on {@link #executor} thread only — both accessibility-event
+     * calls and the periodic poll funnel through the executor so all access
+     * to the poll future and the pending set is single-threaded.
+     */
+    private void checkRehideOnClose() {
+        Set<String> pending = repo.getPendingRehideOnClose();
+        if (pending.isEmpty()) {
+            stopRehideOnClosePoll();
+            return;
+        }
+
+        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        if (am == null) return;
+
+        for (String pkg : pending) {
+            if (repo.isInRehideOnCloseGrace(pkg)) continue;
+            if (!hasTaskInRecents(am, pkg)) {
+                repo.rehideClosedApp(pkg);
+                Log.d(TAG, "Rehid closed app: " + pkg);
+            }
+        }
+
+        // Start or stop the poll based on whether apps remain
+        if (repo.hasPendingRehideOnClose()) {
+            startRehideOnClosePoll();
+        } else {
+            stopRehideOnClosePoll();
+        }
+    }
+
+    /** Start a 3-second poll (serialised through {@link #executor}). */
+    private void startRehideOnClosePoll() {
+        if (rehideOnClosePoll != null) return;
+        rehideOnClosePoll = scheduler.scheduleAtFixedRate(
+                () -> executor.execute(() -> {
+                    try { checkRehideOnClose(); } catch (Exception e) {
+                        Log.w(TAG, "rehideOnClose poll error", e);
+                    }
+                }),
+                3, 3, TimeUnit.SECONDS);
+        Log.d(TAG, "Started rehideOnClose poll");
+    }
+
+    private void stopRehideOnClosePoll() {
+        ScheduledFuture<?> poll = rehideOnClosePoll;
+        if (poll != null) {
+            poll.cancel(false);
+            rehideOnClosePoll = null;
+            Log.d(TAG, "Stopped rehideOnClose poll");
+        }
+    }
+
+    /**
+     * @return {@code true} if the given package still has at least one task
+     *         in the recent-apps list.
+     */
+    @SuppressWarnings("deprecation")
+    private boolean hasTaskInRecents(ActivityManager am, String packageName) {
+        try {
+            List<ActivityManager.RecentTaskInfo> tasks =
+                    am.getRecentTasks(100, ActivityManager.RECENT_WITH_EXCLUDED);
+            if (tasks != null) {
+                for (ActivityManager.RecentTaskInfo task : tasks) {
+                    if (task.baseIntent != null
+                            && task.baseIntent.getComponent() != null
+                            && packageName.equals(
+                                    task.baseIntent.getComponent().getPackageName())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "hasTaskInRecents failed for " + packageName, e);
+        }
+        return false;
+    }
+
     /**
      * Remove all tasks belonging to the given package from the recent-apps
      * list so that no trace remains after re-hiding.
@@ -468,11 +560,13 @@ public class LokkerAccessibilityService extends AccessibilityService {
                     taskStackListenerClass.getClassLoader(),
                     taskStackListenerClass.getInterfaces(),
                     (proxy, method, args) -> {
-                        // We only care about onTaskMovedToFront for now.
                         if ("onTaskMovedToFront".equals(method.getName())) {
-                            // args[0] is RunningTaskInfo on newer APIs,
-                            // or int taskId on older ones.
                             Log.d(TAG, "TaskStackListener: onTaskMovedToFront");
+                        } else if ("onTaskRemoved".equals(method.getName())) {
+                            // A task was removed — check if any "unhide until
+                            // closed" apps should be re-hidden.
+                            Log.d(TAG, "TaskStackListener: onTaskRemoved");
+                            executor.execute(this::checkRehideOnClose);
                         }
                         // Return sensible defaults for other methods
                         if (method.getReturnType() == void.class) return null;

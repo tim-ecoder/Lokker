@@ -1,6 +1,7 @@
 package com.lokker.app.ui;
 
 import android.content.Intent;
+import android.util.Log;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -280,6 +281,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(() -> {
             AppRepository repo = AppRepository.getInstance(this);
             repo.unhideTemporarily(app.packageName);
+            try { Thread.sleep(150); } catch (InterruptedException ignored) {}
             repo.launchHiddenApp(app.packageName);
         }).start();
     }
@@ -287,6 +289,10 @@ public class MainActivity extends AppCompatActivity {
     private void showContextMenu(View anchor, LokkerApp app) {
         PopupMenu popup = new PopupMenu(this, anchor);
         popup.getMenuInflater().inflate(R.menu.context_menu, popup.getMenu());
+
+        // Only show "Unhide until closed" for currently hidden apps
+        popup.getMenu().findItem(R.id.ctx_unhide_until_closed).setVisible(app.hidden);
+
         popup.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
             if (id == R.id.ctx_hotkey) {
@@ -298,6 +304,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (id == R.id.ctx_launch) {
                 onAppClick(app);
                 return true;
+            } else if (id == R.id.ctx_unhide_until_closed) {
+                onUnhideUntilClosed(app);
+                return true;
             } else if (id == R.id.ctx_remove) {
                 showRemoveConfirmDialog(app);
                 return true;
@@ -305,6 +314,19 @@ public class MainActivity extends AppCompatActivity {
             return false;
         });
         popup.show();
+    }
+
+    private void onUnhideUntilClosed(LokkerApp app) {
+        Toast.makeText(this,
+                getString(R.string.launching_msg, app.appLabel),
+                Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            AppRepository repo = AppRepository.getInstance(this);
+            boolean ok = repo.unhideUntilClosed(app.packageName);
+            Log.w("Lokker", "unhideUntilClosed(" + app.packageName + ") = " + ok);
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            repo.launchHiddenApp(app.packageName, false);
+        }).start();
     }
 
     private void showRemoveConfirmDialog(LokkerApp app) {

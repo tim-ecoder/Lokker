@@ -45,6 +45,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 
 /**
@@ -57,6 +59,7 @@ public class AppRepository {
 
     private static final String TAG = "AppRepository";
     private static final String KEY_PENDING_REHIDE = "pending_rehide";
+    private static final String KEY_PENDING_REHIDE_ON_CLOSE = "pending_rehide_on_close";
     private static final String KEY_UNHIDE_ALL_SNAPSHOT = "unhide_all_snapshot";
     private static final String KEY_SELF_HIDDEN = "self_hidden";
 
@@ -70,7 +73,11 @@ public class AppRepository {
     private final LokkerPrefs lokkerPrefs;
     private final SharedPreferences prefs;
 
+    private static final long REHIDE_ON_CLOSE_GRACE_MS = 5000;
+
     private Set<String> pendingRehide = new HashSet<>();
+    private Set<String> pendingRehideOnClose = new HashSet<>();
+    private final Map<String, Long> rehideOnCloseGrace = new HashMap<>();
 
     private AppRepository(Context context) {
         this.ctx = context.getApplicationContext();
@@ -81,6 +88,7 @@ public class AppRepository {
         this.lokkerPrefs = LokkerPrefs.getInstance(ctx);
         this.prefs = lokkerPrefs.getPrefs();
         loadPendingRehide();
+        loadPendingRehideOnClose();
     }
 
     public static AppRepository getInstance(Context context) {
@@ -129,6 +137,8 @@ public class AppRepository {
         appDao.delete(packageName);
         pendingRehide.remove(packageName);
         persistPendingRehide();
+        pendingRehideOnClose.remove(packageName);
+        persistPendingRehideOnClose();
 
         rebuildDynamicShortcuts();
 
@@ -189,6 +199,75 @@ public class AppRepository {
     }
 
     /**
+     * Unhide an application until the user closes it (removes the task from
+     * recents).  Unlike {@link #unhideTemporarily(String)}, the app will
+     * <b>not</b> be re-hidden when it merely loses foreground focus.
+     *
+     * @return {@code true} if the app was hidden and is now visible,
+     *         {@code false} if not managed or not currently hidden.
+     */
+    public boolean unhideUntilClosed(String packageName) {
+        LokkerApp record = appDao.get(packageName);
+        if (record == null || !record.hidden) return false;
+
+        setApplicationHiddenSetting(packageName, false);
+
+        pendingRehideOnClose.add(packageName);
+        rehideOnCloseGrace.put(packageName,
+                android.os.SystemClock.elapsedRealtime() + REHIDE_ON_CLOSE_GRACE_MS);
+        persistPendingRehideOnClose();
+
+        return true;
+    }
+
+    /**
+     * Re-hide an application that was unhidden via
+     * {@link #unhideUntilClosed(String)} and remove it from the
+     * pending-rehide-on-close set.
+     */
+    public void rehideClosedApp(String packageName) {
+        setApplicationHiddenSetting(packageName, true);
+        pendingRehideOnClose.remove(packageName);
+        rehideOnCloseGrace.remove(packageName);
+        persistPendingRehideOnClose();
+    }
+
+    /**
+     * @return {@code true} if {@code packageName} is in the
+     *         pending-rehide-on-close set.
+     */
+    public boolean isPendingRehideOnClose(String packageName) {
+        return pendingRehideOnClose.contains(packageName);
+    }
+
+    /**
+     * @return {@code true} if the package was recently unhidden and should
+     *         not be checked for task existence yet (grace period to allow
+     *         the app to create its task in recents).
+     */
+    public boolean isInRehideOnCloseGrace(String packageName) {
+        Long until = rehideOnCloseGrace.get(packageName);
+        if (until == null) return false;
+        if (android.os.SystemClock.elapsedRealtime() < until) return true;
+        rehideOnCloseGrace.remove(packageName);
+        return false;
+    }
+
+    /**
+     * @return {@code true} if there are any apps pending rehide-on-close.
+     */
+    public boolean hasPendingRehideOnClose() {
+        return !pendingRehideOnClose.isEmpty();
+    }
+
+    /**
+     * @return a snapshot of the pending-rehide-on-close set.
+     */
+    public Set<String> getPendingRehideOnClose() {
+        return new HashSet<>(pendingRehideOnClose);
+    }
+
+    /**
      * Called from Application.onCreate() to re-hide any apps that leaked
      * visibility because the process was killed while they were temporarily
      * unhidden.
@@ -200,6 +279,13 @@ public class AppRepository {
             pendingRehide.remove(pkg);
         }
         persistPendingRehide();
+
+        loadPendingRehideOnClose();
+        for (String pkg : new HashSet<>(pendingRehideOnClose)) {
+            setApplicationHiddenSetting(pkg, true);
+            pendingRehideOnClose.remove(pkg);
+        }
+        persistPendingRehideOnClose();
     }
 
     /**
@@ -232,20 +318,38 @@ public class AppRepository {
      * {@code getLaunchIntentForPackage} can resolve the hidden package.
      */
     public void launchHiddenApp(String packageName) {
+        launchHiddenApp(packageName, true);
+    }
+
+    /**
+     * Launch a hidden app.
+     *
+     * @param excludeFromRecents {@code true} to hide the task from the
+     *                           recents list (normal temporary-unhide),
+     *                           {@code false} to let it appear in recents
+     *                           (unhide-until-closed mode).
+     */
+    public void launchHiddenApp(String packageName, boolean excludeFromRecents) {
         Intent intent = pm.getLaunchIntentForPackage(packageName);
+        Log.w(TAG, "launchHiddenApp: first getLaunchIntent for " + packageName
+                + " = " + (intent != null));
 
         // If null, the launcher activity may have been left disabled — fix it
         if (intent == null) {
             repairDisabledLauncherActivity(packageName);
             intent = pm.getLaunchIntentForPackage(packageName);
+            Log.w(TAG, "launchHiddenApp: after repair getLaunchIntent = "
+                    + (intent != null));
         }
         if (intent == null) {
-            Log.e(TAG, "launchHiddenApp: no launch intent for " + packageName);
+            Log.w(TAG, "launchHiddenApp: FAILED no launch intent for " + packageName);
             return;
         }
 
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        if (excludeFromRecents) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+        }
         ctx.startActivity(intent);
     }
 
@@ -321,6 +425,8 @@ public class AppRepository {
 
         pendingRehide.clear();
         persistPendingRehide();
+        pendingRehideOnClose.clear();
+        persistPendingRehideOnClose();
     }
 
     /**
@@ -655,6 +761,18 @@ public class AppRepository {
     private void loadPendingRehide() {
         Set<String> stored = prefs.getStringSet(KEY_PENDING_REHIDE, null);
         pendingRehide = stored != null ? new HashSet<>(stored) : new HashSet<>();
+    }
+
+    private void persistPendingRehideOnClose() {
+        prefs.edit()
+                .putStringSet(KEY_PENDING_REHIDE_ON_CLOSE,
+                        new HashSet<>(pendingRehideOnClose))
+                .apply();
+    }
+
+    private void loadPendingRehideOnClose() {
+        Set<String> stored = prefs.getStringSet(KEY_PENDING_REHIDE_ON_CLOSE, null);
+        pendingRehideOnClose = stored != null ? new HashSet<>(stored) : new HashSet<>();
     }
 
     // ── Unhide-all snapshot persistence ─────────────────────────────────

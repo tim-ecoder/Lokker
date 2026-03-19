@@ -74,6 +74,7 @@
     <!-- Context Menu -->
     <string name="ctx_hotkey">Assign hotkey</string>
     <string name="ctx_launch">Launch</string>
+    <string name="ctx_unhide_until_closed">Unhide until closed</string>
     <string name="ctx_remove">Remove from Lokker</string>
 
     <!-- Remove Confirm -->
