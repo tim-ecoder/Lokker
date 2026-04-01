@@ -90,6 +90,7 @@
     <string name="hotkey_record_hint">Нажмите для записи новой последовательности</string>
     <string name="hotkey_recording">Нажимайте клавиши…</string>
     <string name="hotkey_conflict">Эта комбинация уже назначена: %s</string>
+    <string name="hotkey_until_closed">Показывать до закрытия</string>
     <string name="section_lokker_hotkey">Открытие Lokker</string>
     <string name="section_app_hotkeys">Горячие клавиши приложений</string>
     <string name="no_hidden_apps">Нет скрытых приложений</string>

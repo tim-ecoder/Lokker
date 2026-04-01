@@ -35,6 +35,8 @@ import androidx.core.content.ContextCompat;
 import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
+import com.lokker.app.data.db.LokkerApp;
+import com.lokker.app.data.db.LokkerDatabase;
 import com.lokker.app.domain.AppRepository;
 import com.lokker.app.domain.AuthManager;
 
@@ -476,13 +478,26 @@ public class AuthActivity extends AppCompatActivity {
         if (targetPackage != null && !targetPackage.isEmpty()) {
             AppRepository repo = AppRepository.getInstance(getApplicationContext());
             new Thread(() -> {
-                repo.unhideTemporarily(targetPackage);
-                // Give PackageManager time to refresh its cache after unhiding
-                try { Thread.sleep(150); } catch (InterruptedException ignored) {}
-                runOnUiThread(() -> {
-                    repo.launchHiddenApp(targetPackage);
-                    finish();
-                });
+                LokkerDatabase db = LokkerDatabase.getInstance(getApplicationContext());
+                LokkerApp app = db.lokkerAppDao().get(targetPackage);
+                boolean untilClosed = app != null && app.hotkeyUntilClosed;
+
+                if (untilClosed) {
+                    repo.unhideUntilClosed(targetPackage);
+                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                    runOnUiThread(() -> {
+                        repo.launchHiddenApp(targetPackage, false);
+                        finish();
+                    });
+                } else {
+                    repo.unhideTemporarily(targetPackage);
+                    // Give PackageManager time to refresh its cache after unhiding
+                    try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+                    runOnUiThread(() -> {
+                        repo.launchHiddenApp(targetPackage);
+                        finish();
+                    });
+                }
             }).start();
         } else if (getCallingActivity() != null) {
             setResult(RESULT_OK);

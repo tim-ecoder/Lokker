@@ -14,6 +14,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.appcompat.widget.SwitchCompat;
+
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
@@ -423,6 +425,20 @@ public class HotkeySetupActivity extends AppCompatActivity {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         rbLp.topMargin = dp(8);
         sheet.addView(recordBtn, rbLp);
+
+        // "Unhide until closed" toggle
+        SwitchCompat untilClosedToggle = new SwitchCompat(this);
+        untilClosedToggle.setText(R.string.hotkey_until_closed);
+        untilClosedToggle.setTextColor(getResColor(R.color.colorOnSurface));
+        untilClosedToggle.setChecked(app.hotkeyUntilClosed);
+        LinearLayout.LayoutParams ucLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        ucLp.topMargin = dp(16);
+        sheet.addView(untilClosedToggle, ucLp);
+        untilClosedToggle.setOnCheckedChangeListener((buttonView, isChecked) ->
+                new Thread(() -> db.lokkerAppDao().setHotkeyUntilClosed(
+                        app.packageName, isChecked)).start());
 
         final CountDownTimer[] sheetTimer = {null};
         final List<Integer> appRecordedKeys = new ArrayList<>();

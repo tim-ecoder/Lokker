@@ -15,6 +15,7 @@ public class LokkerApp {
     public List<Integer> hotkeySequence;
     public boolean hidden;
     public long addedAt;
+    public boolean hotkeyUntilClosed;
 
     public LokkerApp(@NonNull String packageName, String appLabel, List<Integer> hotkeySequence, boolean hidden, long addedAt) {
         this.packageName = packageName;

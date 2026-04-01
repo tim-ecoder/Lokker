@@ -37,6 +37,9 @@ public interface LokkerAppDao {
     @Query("UPDATE lokker_apps SET hotkeySequence = :hotkey WHERE packageName = :packageName")
     void setHotkey(String packageName, String hotkey);
 
+    @Query("UPDATE lokker_apps SET hotkeyUntilClosed = :value WHERE packageName = :packageName")
+    void setHotkeyUntilClosed(String packageName, boolean value);
+
     @Query("DELETE FROM lokker_apps WHERE packageName = :packageName")
     void delete(String packageName);
 

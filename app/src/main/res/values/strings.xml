@@ -91,6 +91,7 @@
     <string name="hotkey_record_hint">Tap to record a new sequence</string>
     <string name="hotkey_recording">Press keys\u2026</string>
     <string name="hotkey_conflict">This combination is already assigned: %s</string>
+    <string name="hotkey_until_closed">Unhide until closed</string>
     <string name="section_lokker_hotkey">Open Lokker</string>
     <string name="section_app_hotkeys">App hotkeys</string>
     <string name="no_hidden_apps">No hidden apps</string>
