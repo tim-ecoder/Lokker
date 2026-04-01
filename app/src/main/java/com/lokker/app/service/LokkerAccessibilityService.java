@@ -91,6 +91,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
     private ScheduledExecutorService scheduler;
     private volatile ScheduledFuture<?> rehideOnClosePoll;
     private BroadcastReceiver screenReceiver;
+    /** Cached hotkey config for synchronous prefix checks on the main thread. */
+    private volatile HotkeyManager.HotkeyConfig cachedHotkeyConfig;
 
     // ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -105,6 +107,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
         activeHotkeyManager = hotkeyManager;
         executor = Executors.newSingleThreadExecutor();
         scheduler = Executors.newSingleThreadScheduledExecutor();
+
+        // Pre-load hotkey config off main thread for synchronous prefix checks
+        executor.execute(() -> cachedHotkeyConfig = hotkeyManager.getHotkeyConfig());
 
         // Ensure we receive key events
         AccessibilityServiceInfo info = getServiceInfo();
@@ -207,6 +212,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
     private volatile ScheduledFuture<?> pendingLongPress;
     private int lastKeyDown = -1;
+    /** Keys whose ACTION_DOWN was consumed; consume their ACTION_UP too. */
+    private final java.util.Set<Integer> consumedKeys = new java.util.HashSet<>();
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
@@ -220,6 +227,10 @@ public class LokkerAccessibilityService extends AccessibilityService {
                 pendingLongPress.cancel(false);
                 pendingLongPress = null;
                 lastKeyDown = -1;
+            }
+            // Consume the UP if we consumed the DOWN to keep the pair consistent
+            if (consumedKeys.remove(keyCode)) {
+                return true;
             }
             return super.onKeyEvent(event);
         }
@@ -293,6 +304,14 @@ public class LokkerAccessibilityService extends AccessibilityService {
             });
         }, LONG_PRESS_MS, TimeUnit.MILLISECONDS);
 
+        // Consume the key if the buffer is a prefix of any hotkey sequence,
+        // so the keys don't leak to the system (e.g. volume change).
+        // Uses cached config to avoid DB access on the main thread.
+        if (isBufferHotkeyPrefixCached(bufferSnapshot)) {
+            consumedKeys.add(keyCode);
+            return true;
+        }
+        consumedKeys.remove(keyCode);
         return super.onKeyEvent(event);
     }
 
@@ -307,6 +326,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
         if (recordListener != null) return;
 
         HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
+        cachedHotkeyConfig = config;  // refresh cache for synchronous checks
 
         // 1. Check the Lokker hotkey (opens AuthActivity with no target).
         List<Integer> lokkerHotkey = config.getLokkerHotkey();
@@ -338,6 +358,24 @@ public class LokkerAccessibilityService extends AccessibilityService {
         if (buffer == null || buffer.isEmpty()) return false;
 
         HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
+
+        List<Integer> lokkerHotkey = config.getLokkerHotkey();
+        if (lokkerHotkey != null && isPrefix(buffer, lokkerHotkey)) return true;
+
+        for (List<Integer> seq : config.getAppHotkeys().values()) {
+            if (seq != null && isPrefix(buffer, seq)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Fast, synchronous prefix check using the cached hotkey config.
+     * Safe to call from onKeyEvent (main thread) — no DB access.
+     */
+    private boolean isBufferHotkeyPrefixCached(List<Integer> buffer) {
+        if (buffer == null || buffer.isEmpty()) return false;
+        HotkeyManager.HotkeyConfig config = cachedHotkeyConfig;
+        if (config == null) return false;
 
         List<Integer> lokkerHotkey = config.getLokkerHotkey();
         if (lokkerHotkey != null && isPrefix(buffer, lokkerHotkey)) return true;
