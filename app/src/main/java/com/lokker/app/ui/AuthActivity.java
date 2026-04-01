@@ -478,9 +478,13 @@ public class AuthActivity extends AppCompatActivity {
         if (targetPackage != null && !targetPackage.isEmpty()) {
             AppRepository repo = AppRepository.getInstance(getApplicationContext());
             new Thread(() -> {
-                LokkerDatabase db = LokkerDatabase.getInstance(getApplicationContext());
-                LokkerApp app = db.lokkerAppDao().get(targetPackage);
-                boolean untilClosed = app != null && app.hotkeyUntilClosed;
+                boolean fromHotkey = getIntent().getBooleanExtra("from_hotkey", false);
+                boolean untilClosed = false;
+                if (fromHotkey) {
+                    LokkerDatabase db = LokkerDatabase.getInstance(getApplicationContext());
+                    LokkerApp app = db.lokkerAppDao().get(targetPackage);
+                    untilClosed = app != null && app.hotkeyUntilClosed;
+                }
 
                 if (untilClosed) {
                     repo.unhideUntilClosed(targetPackage);

@@ -514,6 +514,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
             intent.setData(android.net.Uri.parse("lokker://launch/" + targetPackage));
             intent.putExtra("target_package", targetPackage);
         }
+        intent.putExtra("from_hotkey", true);
         startActivity(intent);
         Log.d(TAG, "Launched AuthActivity"
                 + (targetPackage != null ? " for " + targetPackage : ""));
