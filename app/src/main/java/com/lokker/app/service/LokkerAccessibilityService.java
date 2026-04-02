@@ -238,14 +238,13 @@ public class LokkerAccessibilityService extends AccessibilityService {
             // Track release for double/triple-press detection
             lastUpKeyCode = keyCode;
             lastUpTime = SystemClock.elapsedRealtime();
-            // If a held key is released, the hold is broken —
-            // clear the buffer so the combo can't fire after release.
+            // If a HELD key is released, the hold combo is broken — clear
+            // the buffer.  Long-press keys are NOT cleared because releasing
+            // after a long press is normal (the user continues the sequence).
             List<Integer> buf = hotkeyManager.getBuffer();
-            if (!buf.isEmpty()) {
-                int last = buf.get(buf.size() - 1);
-                if (last == -keyCode || last == keyCode + HotkeyManager.HOLD_OFFSET) {
-                    hotkeyManager.clearBuffer();
-                }
+            if (!buf.isEmpty()
+                    && buf.get(buf.size() - 1) == keyCode + HotkeyManager.HOLD_OFFSET) {
+                hotkeyManager.clearBuffer();
             }
             // Consume the UP if we consumed the DOWN to keep the pair consistent
             if (consumedKeys.remove(keyCode)) {

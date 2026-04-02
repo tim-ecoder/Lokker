@@ -160,21 +160,11 @@ public class HotkeyManager {
 
         int offset = haystack.size() - needle.size();
         for (int i = 0; i < needle.size(); i++) {
-            int h = haystack.get(offset + i);
-            int n = needle.get(i);
-            // Long-press (-kc) and hold (kc+30000) are interchangeable
-            if (isLongOrHold(h) && isLongOrHold(n)) {
-                if (baseKeyCode(h) != baseKeyCode(n)) return false;
-            } else {
-                if (h != n) return false;
+            if (!haystack.get(offset + i).equals(needle.get(i))) {
+                return false;
             }
         }
         return true;
-    }
-
-    /** True if the encoded key represents a long-press or hold gesture. */
-    public static boolean isLongOrHold(int code) {
-        return code < 0 || code >= HOLD_OFFSET;
     }
 
     /**
