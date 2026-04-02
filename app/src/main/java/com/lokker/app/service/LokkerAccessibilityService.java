@@ -209,11 +209,16 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
     /** Threshold for distinguishing a tap from a long press. */
     private static final long LONG_PRESS_MS = 500;
+    /** Maximum gap between two short presses to count as a double-press. */
+    private static final long DOUBLE_PRESS_MS = 400;
 
     private volatile ScheduledFuture<?> pendingLongPress;
     private int lastKeyDown = -1;
     /** Keys whose ACTION_DOWN was consumed; consume their ACTION_UP too. */
     private final java.util.Set<Integer> consumedKeys = new java.util.HashSet<>();
+    /** Tracks the last released key for double/triple-press detection. */
+    private int lastUpKeyCode = -1;
+    private long lastUpTime = 0;
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
@@ -223,10 +228,24 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
         // ── ACTION_UP → cancel long-press timer (it was a short tap) ─────
         if (event.getAction() == KeyEvent.ACTION_UP) {
+            Log.d(TAG, "KEY_UP: kc=" + keyCode + " lastKD=" + lastKeyDown
+                    + " plp=" + (pendingLongPress != null));
             if (keyCode == lastKeyDown && pendingLongPress != null) {
                 pendingLongPress.cancel(false);
                 pendingLongPress = null;
                 lastKeyDown = -1;
+            }
+            // Track release for double/triple-press detection
+            lastUpKeyCode = keyCode;
+            lastUpTime = SystemClock.elapsedRealtime();
+            // If a held key is released, the hold is broken —
+            // clear the buffer so the combo can't fire after release.
+            List<Integer> buf = hotkeyManager.getBuffer();
+            if (!buf.isEmpty()) {
+                int last = buf.get(buf.size() - 1);
+                if (last == -keyCode || last == keyCode + HotkeyManager.HOLD_OFFSET) {
+                    hotkeyManager.clearBuffer();
+                }
             }
             // Consume the UP if we consumed the DOWN to keep the pair consistent
             if (consumedKeys.remove(keyCode)) {
@@ -239,19 +258,97 @@ public class LokkerAccessibilityService extends AccessibilityService {
             return super.onKeyEvent(event);
         }
 
-        // If the same key arrives again (repeat/held), ignore it —
-        // let the pending long-press timer continue undisturbed.
-        if (keyCode == lastKeyDown && pendingLongPress != null) {
+        // Held-key auto-repeats must never touch the buffer or timers.
+        // Use both repeatCount AND lastKeyDown tracking because repeatCount
+        // may not be reliable in AccessibilityService key events.
+        if (event.getRepeatCount() > 0
+                || (keyCode == lastKeyDown && pendingLongPress != null)) {
+            Log.d(TAG, "Repeat filtered: kc=" + keyCode
+                    + " repeat=" + event.getRepeatCount()
+                    + " lastKD=" + lastKeyDown + " plp=" + (pendingLongPress != null));
+            return consumedKeys.contains(keyCode);
+        }
+        Log.d(TAG, "KEY_DOWN: kc=" + keyCode
+                + " repeat=" + event.getRepeatCount()
+                + " lastKD=" + lastKeyDown
+                + " lastUpKC=" + lastUpKeyCode
+                + " plp=" + (pendingLongPress != null)
+                + " recording=" + (recordListener != null));
+
+        long now = SystemClock.elapsedRealtime();
+
+        // ── Double/triple-press detection ─────────────────────────────────
+        // Quick re-press of the same key after release → upgrade buffer
+        // entry instead of adding a new one.  No long-press timer needed
+        // because multi-press is inherently short taps.
+        boolean isQuickRepress = (keyCode == lastUpKeyCode
+                && now - lastUpTime < DOUBLE_PRESS_MS);
+        if (isQuickRepress) {
+            // Cancel any pending long-press from previous key
+            ScheduledFuture<?> pending = pendingLongPress;
+            if (pending != null) {
+                pending.cancel(false);
+                pendingLongPress = null;
+            }
+            lastKeyDown = keyCode;
+
+            // ── Recording: signal double/triple upgrade ──────────────
             KeyRecordListener listener = recordListener;
-            // Consume repeats during recording, but never consume BACK
-            return listener != null && keyCode != KeyEvent.KEYCODE_BACK;
+            if (listener != null) {
+                // Send double (10000+kc) or triple (20000+kc) upgrade signal
+                listener.onKeyRecorded(
+                        keyCode + HotkeyManager.DOUBLE_PRESS_OFFSET);
+                consumedKeys.add(keyCode);
+                return true;
+            }
+
+            // ── Normal: upgrade buffer ───────────────────────────────
+            List<Integer> buf = hotkeyManager.getBuffer();
+            if (!buf.isEmpty()) {
+                int last = buf.get(buf.size() - 1);
+                if (last == keyCode) {
+                    hotkeyManager.upgradeDoublePress(keyCode);
+                } else if (last == keyCode + HotkeyManager.DOUBLE_PRESS_OFFSET) {
+                    hotkeyManager.upgradeTriplePress(keyCode);
+                }
+            }
+            List<Integer> bufferSnapshot = hotkeyManager.getBuffer();
+            executor.execute(() -> {
+                try {
+                    if (isBufferHotkeyPrefix(bufferSnapshot)) vibrateTick();
+                    checkHotkeys(bufferSnapshot);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error checking hotkeys", e);
+                }
+            });
+            if (isBufferHotkeyPrefixCached(bufferSnapshot)) {
+                consumedKeys.add(keyCode);
+                return true;
+            }
+            consumedKeys.remove(keyCode);
+            return super.onKeyEvent(event);
         }
 
-        // Different key: cancel any pending long-press from previous key
+        // ── First press (not a quick re-press) ──────────────────────────
+
+        // Different key: cancel any pending long-press from previous key.
+        // If the timer hadn't fired yet, the previous key is still physically
+        // held — upgrade it to hold form (-keyCode) immediately so combos
+        // like HOLD_VOL_UP + VOL_DOWN work without the 500ms wait.
+        int prevKeyDown = lastKeyDown;
         ScheduledFuture<?> pending = pendingLongPress;
         if (pending != null) {
             pending.cancel(false);
             pendingLongPress = null;
+        }
+        // If previous key is still physically held (no UP received),
+        // upgrade it to hold form.  Doesn't matter whether the long-press
+        // timer fired or not — if key1 is down when key2 arrives, it's HOLD.
+        if (prevKeyDown >= 0) {
+            hotkeyManager.upgradeToHold(prevKeyDown);
+            KeyRecordListener rl = recordListener;
+            if (rl != null) rl.onKeyRecorded(
+                    prevKeyDown + HotkeyManager.HOLD_OFFSET);
         }
         lastKeyDown = keyCode;
 
@@ -263,6 +360,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
                 return super.onKeyEvent(event);
             }
             listener.onKeyRecorded(keyCode);
+            consumedKeys.add(keyCode);
             // Schedule long-press upgrade
             pendingLongPress = scheduler.schedule(() -> {
                 Log.d(TAG, "Long press detected (recording) for keyCode=" + keyCode);
@@ -273,7 +371,7 @@ public class LokkerAccessibilityService extends AccessibilityService {
         }
 
         // ── Normal hotkey mode ───────────────────────────────────────────
-        hotkeyManager.onKeyDown(keyCode, SystemClock.elapsedRealtime());
+        hotkeyManager.onKeyDown(keyCode, now);
         List<Integer> bufferSnapshot = hotkeyManager.getBuffer();
 
         executor.execute(() -> {
@@ -371,6 +469,9 @@ public class LokkerAccessibilityService extends AccessibilityService {
     /**
      * Fast, synchronous prefix check using the cached hotkey config.
      * Safe to call from onKeyEvent (main thread) — no DB access.
+     * Uses fuzzy matching on the last buffer element: a short press (K)
+     * is treated as potentially matching a long-press target (-K), since
+     * the key may still be held.
      */
     private boolean isBufferHotkeyPrefixCached(List<Integer> buffer) {
         if (buffer == null || buffer.isEmpty()) return false;
@@ -378,10 +479,10 @@ public class LokkerAccessibilityService extends AccessibilityService {
         if (config == null) return false;
 
         List<Integer> lokkerHotkey = config.getLokkerHotkey();
-        if (lokkerHotkey != null && isPrefix(buffer, lokkerHotkey)) return true;
+        if (lokkerHotkey != null && isPrefixFuzzy(buffer, lokkerHotkey)) return true;
 
         for (List<Integer> seq : config.getAppHotkeys().values()) {
-            if (seq != null && isPrefix(buffer, seq)) return true;
+            if (seq != null && isPrefixFuzzy(buffer, seq)) return true;
         }
         return false;
     }
@@ -393,6 +494,28 @@ public class LokkerAccessibilityService extends AccessibilityService {
         for (int i = 0; i < len; i++) {
             if (!buffer.get(buffer.size() - len + i).equals(target.get(i))) {
                 return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Like {@link #isPrefix}, but the last buffer element matches by base
+     * key code.  A short press (24) can match a long-press (-24), double-press
+     * (10024), or triple-press (20024) target because the gesture might still
+     * be in progress.
+     */
+    private static boolean isPrefixFuzzy(List<Integer> buffer, List<Integer> target) {
+        int len = Math.min(buffer.size(), target.size());
+        for (int i = 0; i < len; i++) {
+            int bufVal = buffer.get(buffer.size() - len + i);
+            int tgtVal = target.get(i);
+            if (i == len - 1) {
+                // Last element: match by base key code (pending upgrade)
+                if (HotkeyManager.baseKeyCode(bufVal)
+                        != HotkeyManager.baseKeyCode(tgtVal)) return false;
+            } else {
+                if (bufVal != tgtVal) return false;
             }
         }
         return true;

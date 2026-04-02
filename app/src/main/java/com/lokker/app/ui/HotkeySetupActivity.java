@@ -26,6 +26,7 @@ import com.google.android.material.button.MaterialButton;
 import android.widget.Toast;
 import com.lokker.app.R;
 import com.lokker.app.data.db.Converters;
+import com.lokker.app.domain.HotkeyManager;
 import com.lokker.app.data.db.HotkeyMap;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
@@ -207,7 +208,8 @@ public class HotkeySetupActivity extends AppCompatActivity {
                 plus.setTextColor(getResColor(R.color.colorOnSurfaceMedium));
                 lokkerBadgeContainer.addView(plus);
             }
-            lokkerBadgeContainer.addView(createKeyBadge(keyCodes.get(i)));
+            lokkerBadgeContainer.addView(createKeyBadge(keyCodes.get(i),
+                    i == keyCodes.size() - 1));
         }
     }
 
@@ -296,16 +298,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
         btn.setText(R.string.hotkey_recording);
 
         LokkerAccessibilityService.startRecording(keyCode -> runOnUiThread(() -> {
-            if (keyCode < 0) {
-                // Long press upgrade: replace last matching tap
-                int normalKey = -keyCode;
-                if (!recordedKeys.isEmpty()
-                        && recordedKeys.get(recordedKeys.size() - 1) == normalKey) {
-                    recordedKeys.set(recordedKeys.size() - 1, keyCode);
-                }
-            } else {
-                recordedKeys.add(keyCode);
-            }
+            upgradeRecordedKey(recordedKeys, keyCode);
             btn.setText(getString(R.string.hotkey_recording) + " (" + recordedKeys.size() + ")");
 
             // Reset the finish timer on each key press
@@ -400,7 +393,8 @@ public class HotkeySetupActivity extends AppCompatActivity {
                     plus.setTextColor(getResColor(R.color.colorOnSurfaceMedium));
                     currentRow.addView(plus);
                 }
-                currentRow.addView(createKeyBadge(app.hotkeySequence.get(i)));
+                currentRow.addView(createKeyBadge(app.hotkeySequence.get(i),
+                        i == app.hotkeySequence.size() - 1));
             }
         } else {
             TextView none = new TextView(this);
@@ -456,15 +450,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
             recordingLabel.setText(R.string.hotkey_recording);
 
             LokkerAccessibilityService.startRecording(keyCode -> runOnUiThread(() -> {
-                if (keyCode < 0) {
-                    int normalKey = -keyCode;
-                    if (!appRecordedKeys.isEmpty()
-                            && appRecordedKeys.get(appRecordedKeys.size() - 1) == normalKey) {
-                        appRecordedKeys.set(appRecordedKeys.size() - 1, keyCode);
-                    }
-                } else {
-                    appRecordedKeys.add(keyCode);
-                }
+                upgradeRecordedKey(appRecordedKeys, keyCode);
                 recordingLabel.setText(getString(R.string.hotkey_recording)
                         + " (" + appRecordedKeys.size() + ")");
 
@@ -572,17 +558,69 @@ public class HotkeySetupActivity extends AppCompatActivity {
         return null;
     }
 
+    // ── Recording helper ──────────────────────────────────────────────
+
+    /**
+     * Process a key code reported by the recording listener.
+     * Handles long-press (negative), double-press (10000+), and
+     * triple-press (20000+) upgrade signals by modifying the last entry.
+     */
+    private void upgradeRecordedKey(List<Integer> keys, int keyCode) {
+        if (keyCode < 0) {
+            // Long press upgrade: replace last matching tap
+            int normalKey = -keyCode;
+            if (!keys.isEmpty() && keys.get(keys.size() - 1) == normalKey) {
+                keys.set(keys.size() - 1, keyCode);
+            }
+        } else if (keyCode >= HotkeyManager.HOLD_OFFSET) {
+            // Hold upgrade: key was physically down when next key arrived.
+            // May upgrade from short press (base) or long-press (-base).
+            int base = keyCode - HotkeyManager.HOLD_OFFSET;
+            if (!keys.isEmpty()) {
+                int last = keys.get(keys.size() - 1);
+                if (last == base || last == -base) {
+                    keys.set(keys.size() - 1, keyCode);
+                }
+            }
+        } else if (keyCode >= HotkeyManager.DOUBLE_PRESS_OFFSET) {
+            // Double or triple press upgrade
+            int base = keyCode - HotkeyManager.DOUBLE_PRESS_OFFSET;
+            if (!keys.isEmpty()) {
+                int last = keys.get(keys.size() - 1);
+                if (last == base) {
+                    keys.set(keys.size() - 1,
+                            base + HotkeyManager.DOUBLE_PRESS_OFFSET);
+                } else if (last == base + HotkeyManager.DOUBLE_PRESS_OFFSET) {
+                    keys.set(keys.size() - 1,
+                            base + HotkeyManager.TRIPLE_PRESS_OFFSET);
+                }
+            }
+        } else {
+            keys.add(keyCode);
+        }
+    }
+
     // ── Key badge widget ────────────────────────────────────────────────
 
     private View createKeyBadge(int keyCode) {
+        return createKeyBadge(keyCode, true);
+    }
+
+    private View createKeyBadge(int keyCode, boolean isLast) {
         TextView badge = new TextView(this);
         String name;
-        if (keyCode < 0) {
-            name = "LONG " + android.view.KeyEvent.keyCodeToString(-keyCode)
-                    .replace("KEYCODE_", "");
+        String keyName = android.view.KeyEvent.keyCodeToString(
+                HotkeyManager.baseKeyCode(keyCode)).replace("KEYCODE_", "");
+        if (HotkeyManager.isHold(keyCode)) {
+            name = "HOLD " + keyName;
+        } else if (HotkeyManager.isTriplePress(keyCode)) {
+            name = "3\u00d7 " + keyName;
+        } else if (HotkeyManager.isDoublePress(keyCode)) {
+            name = "2\u00d7 " + keyName;
+        } else if (keyCode < 0) {
+            name = "LONG " + keyName;
         } else {
-            name = android.view.KeyEvent.keyCodeToString(keyCode)
-                    .replace("KEYCODE_", "");
+            name = keyName;
         }
         badge.setText(name);
         badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
@@ -608,13 +646,18 @@ public class HotkeySetupActivity extends AppCompatActivity {
         for (int i = 0; i < keyCodes.size(); i++) {
             if (i > 0) sb.append(" + ");
             int kc = keyCodes.get(i);
-            if (kc < 0) {
-                sb.append("LONG ");
-                sb.append(android.view.KeyEvent.keyCodeToString(-kc)
-                        .replace("KEYCODE_", ""));
+            String keyName = android.view.KeyEvent.keyCodeToString(
+                    HotkeyManager.baseKeyCode(kc)).replace("KEYCODE_", "");
+            if (HotkeyManager.isHold(kc)) {
+                sb.append("HOLD ").append(keyName);
+            } else if (HotkeyManager.isTriplePress(kc)) {
+                sb.append("3\u00d7 ").append(keyName);
+            } else if (HotkeyManager.isDoublePress(kc)) {
+                sb.append("2\u00d7 ").append(keyName);
+            } else if (kc < 0) {
+                sb.append("LONG ").append(keyName);
             } else {
-                sb.append(android.view.KeyEvent.keyCodeToString(kc)
-                        .replace("KEYCODE_", ""));
+                sb.append(keyName);
             }
         }
         return sb.toString();

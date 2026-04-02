@@ -24,6 +24,12 @@ public class HotkeyManager {
     /** Maximum time between consecutive key presses before the buffer resets. */
     private static final long SEQ_TIMEOUT_MS = 1500L;
 
+    /** Encoded key offsets for multi-press gestures. */
+    public static final int DOUBLE_PRESS_OFFSET = 10000;
+    public static final int TRIPLE_PRESS_OFFSET = 20000;
+    /** Hold = key physically down when the next key arrives. */
+    public static final int HOLD_OFFSET = 30000;
+
     private final HotkeyMapDao hotkeyMapDao;
     private final LokkerAppDao lokkerAppDao;
 
@@ -74,6 +80,63 @@ public class HotkeyManager {
     }
 
     /**
+     * Upgrade the last buffer entry to a hold variant (key physically down
+     * when the next key arrives).  Handles both short press (kc) and
+     * long-press (-kc) → hold (kc + HOLD_OFFSET).
+     */
+    public void upgradeToHold(int keyCode) {
+        if (!buffer.isEmpty()) {
+            int lastIdx = buffer.size() - 1;
+            int last = buffer.get(lastIdx);
+            if (last == keyCode || last == -keyCode) {
+                buffer.set(lastIdx, keyCode + HOLD_OFFSET);
+            }
+        }
+    }
+
+    /**
+     * Upgrade the last buffer entry from a single press to a double-press
+     * variant if it matches the given {@code keyCode}.
+     */
+    public void upgradeDoublePress(int keyCode) {
+        if (!buffer.isEmpty()) {
+            int lastIdx = buffer.size() - 1;
+            if (buffer.get(lastIdx) == keyCode) {
+                buffer.set(lastIdx, keyCode + DOUBLE_PRESS_OFFSET);
+            }
+        }
+    }
+
+    /**
+     * Upgrade the last buffer entry from a double-press to a triple-press
+     * variant if it matches the given {@code keyCode}.
+     */
+    public void upgradeTriplePress(int keyCode) {
+        if (!buffer.isEmpty()) {
+            int lastIdx = buffer.size() - 1;
+            if (buffer.get(lastIdx) == keyCode + DOUBLE_PRESS_OFFSET) {
+                buffer.set(lastIdx, keyCode + TRIPLE_PRESS_OFFSET);
+            }
+        }
+    }
+
+    // ── Static helpers for encoded key codes ────────────────────────────
+
+    /** Extract the raw Android keycode, stripping long/hold/double/triple encoding. */
+    public static int baseKeyCode(int code) {
+        if (code < 0) return -code;
+        if (code >= HOLD_OFFSET) return code - HOLD_OFFSET;
+        if (code >= TRIPLE_PRESS_OFFSET) return code - TRIPLE_PRESS_OFFSET;
+        if (code >= DOUBLE_PRESS_OFFSET) return code - DOUBLE_PRESS_OFFSET;
+        return code;
+    }
+
+    public static boolean isLongPress(int code)   { return code < 0; }
+    public static boolean isHold(int code)         { return code >= HOLD_OFFSET; }
+    public static boolean isDoublePress(int code)  { return code >= DOUBLE_PRESS_OFFSET && code < TRIPLE_PRESS_OFFSET; }
+    public static boolean isTriplePress(int code)  { return code >= TRIPLE_PRESS_OFFSET && code < HOLD_OFFSET; }
+
+    /**
      * @return an unmodifiable snapshot of the current key-code buffer.
      */
     public List<Integer> getBuffer() {
@@ -97,11 +160,21 @@ public class HotkeyManager {
 
         int offset = haystack.size() - needle.size();
         for (int i = 0; i < needle.size(); i++) {
-            if (!haystack.get(offset + i).equals(needle.get(i))) {
-                return false;
+            int h = haystack.get(offset + i);
+            int n = needle.get(i);
+            // Long-press (-kc) and hold (kc+30000) are interchangeable
+            if (isLongOrHold(h) && isLongOrHold(n)) {
+                if (baseKeyCode(h) != baseKeyCode(n)) return false;
+            } else {
+                if (h != n) return false;
             }
         }
         return true;
+    }
+
+    /** True if the encoded key represents a long-press or hold gesture. */
+    public static boolean isLongOrHold(int code) {
+        return code < 0 || code >= HOLD_OFFSET;
     }
 
     /**
