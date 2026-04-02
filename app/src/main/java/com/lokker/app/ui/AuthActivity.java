@@ -373,6 +373,7 @@ public class AuthActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (lockedOut) return super.onKeyDown(keyCode, event);
+        if (event.getRepeatCount() > 0) return true;
 
         if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
             onDigitPressed(String.valueOf(keyCode - KeyEvent.KEYCODE_0));
