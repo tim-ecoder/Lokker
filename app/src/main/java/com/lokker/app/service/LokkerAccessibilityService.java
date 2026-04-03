@@ -79,7 +79,11 @@ public class LokkerAccessibilityService extends AccessibilityService {
         recordListener = null;
         HotkeyManager mgr = activeHotkeyManager;
         if (mgr != null) mgr.clearBuffer();
+        // Invalidate cached config so next hotkey check picks up any changes
+        cachedHotkeyConfigStale = true;
     }
+
+    private static volatile boolean cachedHotkeyConfigStale;
 
     /** The package name currently in the foreground. */
     private String currentForegroundPkg;
@@ -228,8 +232,6 @@ public class LokkerAccessibilityService extends AccessibilityService {
 
         // ── ACTION_UP → cancel long-press timer (it was a short tap) ─────
         if (event.getAction() == KeyEvent.ACTION_UP) {
-            Log.d(TAG, "KEY_UP: kc=" + keyCode + " lastKD=" + lastKeyDown
-                    + " plp=" + (pendingLongPress != null));
             if (keyCode == lastKeyDown && pendingLongPress != null) {
                 pendingLongPress.cancel(false);
                 pendingLongPress = null;
@@ -241,9 +243,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
             // If a HELD key is released, the hold combo is broken — clear
             // the buffer.  Long-press keys are NOT cleared because releasing
             // after a long press is normal (the user continues the sequence).
-            List<Integer> buf = hotkeyManager.getBuffer();
-            if (!buf.isEmpty()
-                    && buf.get(buf.size() - 1) == keyCode + HotkeyManager.HOLD_OFFSET) {
+            if (!hotkeyManager.isBufferEmpty()
+                    && hotkeyManager.lastBufferEntry() == keyCode + HotkeyManager.HOLD_OFFSET) {
                 hotkeyManager.clearBuffer();
             }
             // Consume the UP if we consumed the DOWN to keep the pair consistent
@@ -262,17 +263,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
         // may not be reliable in AccessibilityService key events.
         if (event.getRepeatCount() > 0
                 || (keyCode == lastKeyDown && pendingLongPress != null)) {
-            Log.d(TAG, "Repeat filtered: kc=" + keyCode
-                    + " repeat=" + event.getRepeatCount()
-                    + " lastKD=" + lastKeyDown + " plp=" + (pendingLongPress != null));
             return consumedKeys.contains(keyCode);
         }
-        Log.d(TAG, "KEY_DOWN: kc=" + keyCode
-                + " repeat=" + event.getRepeatCount()
-                + " lastKD=" + lastKeyDown
-                + " lastUpKC=" + lastUpKeyCode
-                + " plp=" + (pendingLongPress != null)
-                + " recording=" + (recordListener != null));
 
         long now = SystemClock.elapsedRealtime();
 
@@ -422,8 +414,13 @@ public class LokkerAccessibilityService extends AccessibilityService {
         // If recording started between snapshot and execution, skip matching.
         if (recordListener != null) return;
 
-        HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
-        cachedHotkeyConfig = config;  // refresh cache for synchronous checks
+        // Use cached config for matching; refresh from DB only when stale.
+        HotkeyManager.HotkeyConfig config = cachedHotkeyConfig;
+        if (config == null || cachedHotkeyConfigStale) {
+            config = hotkeyManager.getHotkeyConfig();
+            cachedHotkeyConfig = config;
+            cachedHotkeyConfigStale = false;
+        }
 
         // 1. Check the Lokker hotkey (opens AuthActivity with no target).
         List<Integer> lokkerHotkey = config.getLokkerHotkey();
@@ -454,7 +451,8 @@ public class LokkerAccessibilityService extends AccessibilityService {
     private boolean isBufferHotkeyPrefix(List<Integer> buffer) {
         if (buffer == null || buffer.isEmpty()) return false;
 
-        HotkeyManager.HotkeyConfig config = hotkeyManager.getHotkeyConfig();
+        HotkeyManager.HotkeyConfig config = cachedHotkeyConfig;
+        if (config == null) return false;
 
         List<Integer> lokkerHotkey = config.getLokkerHotkey();
         if (lokkerHotkey != null && isPrefix(buffer, lokkerHotkey)) return true;

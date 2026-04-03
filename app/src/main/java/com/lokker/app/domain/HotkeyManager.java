@@ -143,6 +143,18 @@ public class HotkeyManager {
         return Collections.unmodifiableList(new ArrayList<>(buffer));
     }
 
+    /**
+     * @return the last element in the buffer, or 0 if empty.
+     */
+    public int lastBufferEntry() {
+        return buffer.isEmpty() ? 0 : buffer.get(buffer.size() - 1);
+    }
+
+    /** @return true if the buffer is empty. */
+    public boolean isBufferEmpty() {
+        return buffer.isEmpty();
+    }
+
     // ── Sequence matching ───────────────────────────────────────────────
 
     /**
