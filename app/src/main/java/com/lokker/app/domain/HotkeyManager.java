@@ -226,6 +226,8 @@ public class HotkeyManager {
 
         private final List<Integer> lokkerHotkey;
         private final Map<String, List<Integer>> appHotkeys;
+        /** All base keycodes that appear in any configured hotkey. */
+        private final java.util.Set<Integer> hotkeyKeyCodes;
 
         public HotkeyConfig(List<Integer> lokkerHotkey,
                             Map<String, List<Integer>> appHotkeys) {
@@ -233,6 +235,23 @@ public class HotkeyManager {
             this.appHotkeys = appHotkeys != null
                     ? Collections.unmodifiableMap(appHotkeys)
                     : Collections.emptyMap();
+
+            // Build set of all base keycodes used in hotkeys
+            java.util.Set<Integer> codes = new java.util.HashSet<>();
+            if (lokkerHotkey != null) {
+                for (int code : lokkerHotkey) codes.add(baseKeyCode(code));
+            }
+            for (List<Integer> seq : this.appHotkeys.values()) {
+                if (seq != null) {
+                    for (int code : seq) codes.add(baseKeyCode(code));
+                }
+            }
+            this.hotkeyKeyCodes = codes;
+        }
+
+        /** True if this keycode is used in any configured hotkey. */
+        public boolean isHotkeyKey(int keyCode) {
+            return hotkeyKeyCodes.contains(keyCode);
         }
 
         /**
