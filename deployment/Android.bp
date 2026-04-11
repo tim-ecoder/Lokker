@@ -1,0 +1,21 @@
+android_app_import {
+    name: "Lokker",
+    apk: "Lokker.apk",
+    certificate: "platform",
+    privileged: true,
+    system_ext_specific: true,
+    dex_preopt: {
+        enabled: false,
+    },
+    required: [
+        "com.lokker.app.privapp-permissions",
+    ],
+}
+
+prebuilt_etc {
+    name: "com.lokker.app.privapp-permissions",
+    system_ext_specific: true,
+    sub_dir: "permissions",
+    src: "com.lokker.app.privapp-permissions.xml",
+    filename_from_src: true,
+}
