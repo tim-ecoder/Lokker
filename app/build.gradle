@@ -4,7 +4,20 @@ plugins {
 
 android {
     signingConfigs {
-        def keystoreFile = file('D:/Programming/keystores/keystore3.jks')
+        // Keystore lookup: -PlokkerKeystore=<path> or LOKKER_KEYSTORE env var,
+        // otherwise the first existing known location (Windows, then Linux).
+        // new File() instead of file(): file('D:/...') fails on Linux.
+        def keystoreCandidates = [
+                project.findProperty('lokkerKeystore'),
+                System.getenv('LOKKER_KEYSTORE'),
+                'D:/Programming/keystores/keystore3.jks',
+                '/data/@SIGNING-KEYS/keystore3.jks',
+        ].findAll { it }
+        def keystoreFile = keystoreCandidates.collect { new File(it) }.find { it.isFile() }
+        if (keystoreFile == null) {
+            throw new GradleException("Lokker keystore not found. Tried: ${keystoreCandidates}. "
+                    + "Pass -PlokkerKeystore=<path> or set LOKKER_KEYSTORE.")
+        }
         debug {
             storeFile keystoreFile
             storePassword 'qwerty'

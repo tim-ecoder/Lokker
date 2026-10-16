@@ -1047,10 +1047,10 @@ public class HotkeyMap {
 
 ### Gradle-сборка APK
 
-- Gradle 8.8, AGP 8.2.0, `compileSdk 35`, `targetSdk 35`, `minSdk 26`, Java 17.
+- Gradle 8.8, AGP 8.2.2, `compileSdk 35`, `targetSdk 35`, `minSdk 26`, исходники Java 17. Собирается и на JDK 17, и на JDK 21: AGP 8.2.0 на JDK 21 падал в `JdkImageTransform`/jlink.
 - Зависимости: appcompat 1.6.1, recyclerview 1.3.2, material 1.11.0, room 2.6.1 (annotationProcessor), security-crypto 1.1.0-alpha06, biometric 1.2.0-alpha05, lifecycle-viewmodel/livedata 2.7.0, core 1.12.0.
 - `versionName` берётся из `app/build.gradle` (сейчас `1.2b`), имя артефакта — `Lokker-v{versionName}.apk`. `versionName` в манифесте (1.0) переопределяется Gradle.
-- Подпись: путь к keystore прописан жёстко (`D:/Programming/keystores/keystore3.jks`), то есть release собирается на Windows-машине разработчика. При встраивании через `android_app_import` с `certificate: "platform"` система сборки переподписывает APK платформенным ключом прошивки. Без этого signature-разрешения вроде `MANAGE_USERS` выданы не будут.
+- Подпись: `keystore3.jks`, alias `key0` (это **не** платформенный ключ). Путь ищется по порядку: `-PlokkerKeystore=<путь>`, переменная окружения `LOKKER_KEYSTORE`, `D:/Programming/keystores/keystore3.jks` (Windows), `/data/@SIGNING-KEYS/keystore3.jks` (Linux). Если ничего не найдено, сборка останавливается с понятным сообщением. При встраивании через `android_app_import` с `certificate: "platform"` система сборки переподписывает APK платформенным ключом прошивки. Без этого signature-разрешения вроде `MANAGE_USERS` выданы не будут.
 
 ```bash
 ./gradlew assembleRelease

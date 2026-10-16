@@ -86,7 +86,14 @@ UI strings are in English with a Russian translation (`values-ru`).
 
 Output: `app/build/outputs/apk/release/Lokker-v{versionName}.apk` (`versionName` is set in `app/build.gradle`).
 
-Note: the signing config points to a hard-coded keystore path (`D:/Programming/keystores/keystore3.jks`). Adjust it in `app/build.gradle` when building on another machine.
+Works with JDK 17 or 21. The APK is signed with `keystore3.jks` (alias `key0`; this is not the platform key, which the OS build applies). The keystore is looked up in this order:
+
+1. `-PlokkerKeystore=<path>`
+2. the `LOKKER_KEYSTORE` environment variable
+3. `D:/Programming/keystores/keystore3.jks` (Windows)
+4. `/data/@SIGNING-KEYS/keystore3.jks` (Linux)
+
+Set `ANDROID_HOME` (or `sdk.dir` in `local.properties`) to an SDK with platform 35.
 
 ## Installation
 
