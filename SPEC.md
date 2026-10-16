@@ -935,6 +935,8 @@ public boolean hasUnhideAllSnapshot() {
 
 Горячие клавиши обрабатываются в `LokkerAccessibilityService.onKeyEvent()` (флаг `FLAG_REQUEST_FILTER_KEY_EVENTS`, в конфигурации сервиса `canRequestFilterKeyEvents="true"`). Буфер последовательности и сопоставление реализованы в `HotkeyManager`.
 
+> **Конфигурация сервиса** (`res/xml/accessibility_service_config.xml`): события только `typeWindowStateChanged`, флаг `flagRequestFilterKeyEvents`, `canRequestFilterKeyEvents="true"`. Флага `canRetrieveWindowContent` **нет** и он не нужен: сервис читает из события только тип и `getPackageName()`. Доступ к содержимому окон (`getSource()`, `getRootInActiveWindow()`) не используется, поэтому сервис не видит текст других приложений. Флаг удалён 2026-10-16.
+
 ### Кодирование типов нажатий
 
 Последовательность хранится как `List<Integer>`. Тип нажатия кодируется в самом числе:
