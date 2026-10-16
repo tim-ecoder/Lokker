@@ -4,13 +4,13 @@
 **Целевая платформа:** LineageOS 22 · Android 15 · API 35
 **Язык:** Java
 **Тип:** Привилегированный системный APK (`/system/system_ext/priv-app`)
-**Версия реализации:** v1.2a (ветка `claude/lokker-system-app-yTUtg`)
+**Версия реализации:** v1.2b (ветка `claude/lokker-system-app-yTUtg`)
 
 ---
 
 ## 0. Статус документа и отличия реализации от исходного дизайна
 
-Изначально документ был проектной спецификацией. Теперь он приведён к фактическому состоянию кода v1.2a. Если текст и код расходятся, верен код. Ключевые изменения относительно первоначального дизайна:
+Изначально документ был проектной спецификацией. Теперь он приведён к фактическому состоянию кода v1.2b. Если текст и код расходятся, верен код. Ключевые изменения относительно первоначального дизайна:
 
 | Тема | Исходный дизайн | Фактическая реализация |
 |---|---|---|
@@ -22,7 +22,8 @@
 | Режимы раскрытия | Только временное (повторное скрытие при уходе с переднего плана) | Временное + **«раскрыть до закрытия»** (повторное скрытие после удаления задачи из недавних) (Раздел 4) |
 | Закреплённые ярлыки | Создаются автоматически в `addApplication()` | **Не создаются.** Вместо них есть `CreateShortcutActivity` (`ACTION_CREATE_SHORTCUT`) для KeyMapper и других переназначателей клавиш |
 | Динамические ярлыки | — | Были добавлены, затем удалены в v1.1: они показывали скрытые приложения в поиске лаунчера |
-| Импорт/экспорт настроек | Секция «Данные» в настройках | UI удалён. Методы `exportSettings()`/`importSettings()` остались в `AppRepository`, но не используются |
+| Импорт/экспорт настроек | Секция «Данные» в настройках | Удалён полностью (UI — f258db7, остатки кода — 2026-10-16) |
+| Состояние самоскрытия | Флаг `self_hidden` в настройках | Читается из состояния компонента `LokkerLauncher` (Раздел 5) |
 | PBKDF2 | 310 000 итераций | 10 000 итераций. Хеши на 310 000 итераций проверяются как устаревшие и перехешируются при успешном входе |
 | Биометрия | Сначала биометрия, `BIOMETRIC_STRONG \| DEVICE_CREDENTIAL` | Только `BIOMETRIC_STRONG`, по умолчанию выключена, показывается поверх экрана PIN |
 | Включение Accessibility | Вручную | Автоматически в `LokkerApp.onCreate()` через `WRITE_SECURE_SETTINGS` |
@@ -71,8 +72,8 @@
 ├──────────────┬──────────────┬──────────────┬───────────────┤
 │   UI Layer   │  ViewModel   │   Services   │  BroadcastRx  │
 │              │              │              │               │
-│ MainActivity │LokkerViewModel│LokkerAccessSvc│ PackageMonitor│
-│ AuthActivity │              │              │ BootReceiver  │
+│ MainActivity │ (нет; LiveData│LokkerAccessSvc│ PackageMonitor│
+│ AuthActivity │ из DAO)      │              │ BootReceiver  │
 │ SettingsAct  │              │              │ SecretCodeRx  │
 │ ChangePwAct  │              │              │ ScreenReceiver│
 │ HotkeySetup  │              │              │               │
@@ -96,7 +97,7 @@
 |---|---|---|
 | `LokkerApp` (Application) | Application | При старте: `hidden_api_policy=1`, автоматическое включение Accessibility-сервиса, `recoverLeakedApps()` |
 | `LokkerAccessibilityService` | AccessibilityService | Обнаружение смены приложения на переднем плане через `TYPE_WINDOW_STATE_CHANGED` (основной путь); **повторное скрытие при потере фокуса временно раскрытым приложением**; удаление из списка недавних; проверка приложений в режиме «до закрытия» (+ `TaskStackListener.onTaskRemoved`, опрос раз в 3 с); обнаружение и запись горячих клавиш; динамическая регистрация `ScreenReceiver` |
-| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — повторное применение состояния скрытия после обновлений (дополнительная страховка); для собственного пакета сбрасывает `self_hidden` |
+| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — повторное применение состояния скрытия после обновлений (дополнительная страховка); собственный пакет пропускает |
 | `BootReceiver` | BroadcastReceiver | `BOOT_COMPLETED` — повторное применение скрытия ко всем приложениям с `hidden=1` |
 | `ScreenReceiver` | BroadcastReceiver | `SCREEN_ON` — повторное применение скрытия (регистрируется динамически в сервисе, не в манифесте) |
 | `SecretCodeReceiver` | BroadcastReceiver | `*#*#565537#*#*` → `AuthActivity`; `*#*#5655377469#*#*` → `unhideAllSystemWide()` без аутентификации |
@@ -496,24 +497,20 @@ public void setSelfHidden(boolean hidden) {
         : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
 
     pm.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP);
-    prefs.edit().putBoolean("self_hidden", hidden).apply();
+}
+
+public boolean isSelfHidden() {
+    ComponentName alias = new ComponentName(ctx, "com.lokker.app.LokkerLauncher");
+    return pm.getComponentEnabledSetting(alias)
+        == PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
 }
 ```
 
-### Автоматическое раскрытие при переустановке
+### Источник истины для состояния самоскрытия
 
-Когда Lokker сам переустанавливается (или обновляется), он **должен** сбросить видимость в лаунчере. При переустановке `setComponentEnabledSetting` сбрасывается к значению по умолчанию из манифеста (включён), поэтому псевдоним уже восстановлен. `PackageMonitor` обнаруживает `PACKAGE_REPLACED` для собственного пакета Lokker и очищает настройку `self_hidden` для поддержания согласованности состояния:
+Отдельного флага в настройках **нет**. `AppRepository.isSelfHidden()` каждый раз читает фактическое состояние alias через `pm.getComponentEnabledSetting(LokkerLauncher) == COMPONENT_ENABLED_STATE_DISABLED`. Поэтому переключатель в настройках всегда совпадает с тем, что видно в лаунчере, в том числе после обновления или переустановки Lokker и после `adb shell pm enable`. `PackageMonitor` пакет самого Lokker просто пропускает.
 
-```java
-// В PackageMonitor.onReceive():
-if (packageName.equals(ctx.getPackageName())) {
-    // Lokker был переустановлен/обновлён — убеждаемся, что он виден в лаунчере
-    prefs.edit().putBoolean("self_hidden", false).apply();
-    return; // не обрабатываем как скрытое приложение
-}
-```
-
-Это предотвращает сценарий, когда настройка говорит «самоскрыт», но псевдоним уже был сброшен системой, и гарантирует, что пользователь всегда сможет найти Lokker в лаунчере после переустановки.
+> **История:** до этого исправления (2026-10-16) самоскрытие было реализовано дважды. `SettingsActivity` писал флаг `stealth_mode`, а неиспользуемый `AppRepository.setSelfHidden()` писал `self_hidden`, и `PackageMonitor` сбрасывал именно `self_hidden`. В итоге после переустановки переключатель мог показывать «включено» при видимой иконке. На устройствах, обновлённых со старых версий, ключи `stealth_mode`/`self_hidden` могут остаться в настройках, но больше не читаются.
 
 ### Секретные коды номеронабирателя
 
@@ -667,7 +664,7 @@ public boolean verifyPassword(String input) {
 
 #### Секция «Data» — удалена
 
-Импорт и экспорт настроек (JSON через `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT`) удалены из интерфейса в коммите f258db7. Методы `AppRepository.exportSettings()` / `importSettings()` и строки `export_*`/`import_*` пока остались в коде, но нигде не вызываются.
+Импорт и экспорт настроек (JSON через `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT`) удалены из интерфейса в коммите f258db7. Оставшиеся методы `exportSettings()` / `importSettings()` и строки `export_*`/`import_*` удалены 2026-10-16.
 
 #### Секция «About»
 
@@ -1034,12 +1031,11 @@ public class HotkeyMap {
 | `fail_count` | String (число) | Счётчик неудачных попыток |
 | `lockout_until` | String (мс) | Время окончания блокировки |
 | `biometric_enrolled` | boolean | Переключатель «Биометрия» (по умолчанию false) |
-| `self_hidden` | boolean | Lokker скрыт из лаунчера |
 | `pending_rehide` | StringSet | Временно раскрытые пакеты |
 | `pending_rehide_on_close` | StringSet | Пакеты в режиме «до закрытия» |
 | `unhide_all_snapshot` | String (JSON-массив) | Снимок для «Hide all apps» |
 
-> Javadoc класса `LokkerPrefs` и константы `onboarding_complete`, `service_enabled`, `stealth_mode`, `theme` — устаревший каркас, они не используются.
+> Состояние самоскрытия в настройках не хранится (см. Раздел 5). Устаревшие ключи `self_hidden` и `stealth_mode` могут остаться на обновлённых устройствах, но не читаются.
 
 ### Файлы
 
@@ -1053,12 +1049,12 @@ public class HotkeyMap {
 
 - Gradle 8.8, AGP 8.2.0, `compileSdk 35`, `targetSdk 35`, `minSdk 26`, Java 17.
 - Зависимости: appcompat 1.6.1, recyclerview 1.3.2, material 1.11.0, room 2.6.1 (annotationProcessor), security-crypto 1.1.0-alpha06, biometric 1.2.0-alpha05, lifecycle-viewmodel/livedata 2.7.0, core 1.12.0.
-- `versionName` берётся из `app/build.gradle` (сейчас `1.2a`), имя артефакта — `Lokker-v{versionName}.apk`. `versionName` в манифесте (1.0) переопределяется Gradle.
+- `versionName` берётся из `app/build.gradle` (сейчас `1.2b`), имя артефакта — `Lokker-v{versionName}.apk`. `versionName` в манифесте (1.0) переопределяется Gradle.
 - Подпись: путь к keystore прописан жёстко (`D:/Programming/keystores/keystore3.jks`), то есть release собирается на Windows-машине разработчика. При встраивании через `android_app_import` с `certificate: "platform"` система сборки переподписывает APK платформенным ключом прошивки. Без этого signature-разрешения вроде `MANAGE_USERS` выданы не будут.
 
 ```bash
 ./gradlew assembleRelease
-# → app/build/outputs/apk/release/Lokker-v1.2a.apk
+# → app/build/outputs/apk/release/Lokker-v1.2b.apk
 ```
 
 ### Встраивание в образ LineageOS (`deployment/`)
@@ -1106,7 +1102,7 @@ prebuilt_etc {
 
 ```bash
 adb root && adb remount
-adb push Lokker-v1.2a.apk /system/system_ext/priv-app/Lokker/Lokker.apk
+adb push Lokker-v1.2b.apk /system/system_ext/priv-app/Lokker/Lokker.apk
 adb push deployment/com.lokker.app.privapp-permissions.xml /system/system_ext/etc/permissions/
 adb reboot
 ```
@@ -1129,9 +1125,8 @@ Lokker/
     └── src/main/
         ├── AndroidManifest.xml
         ├── res/
-        │   ├── drawable/ (ic_launcher.xml, ic_arrow_back.xml)
-        │   ├── layout/   (activity_*.xml, item_*.xml — не используются активностями, UI строится в коде)
-        │   ├── menu/     (main_menu.xml, context_menu.xml)
+        │   ├── drawable/ic_launcher.xml
+        │   ├── menu/context_menu.xml        # ⋮-меню главного экрана (UI строится в коде, layout/ нет)
         │   ├── values/   (strings.xml EN, colors.xml, styles.xml)
         │   ├── values-ru/strings.xml
         │   └── xml/accessibility_service_config.xml
@@ -1151,9 +1146,8 @@ Lokker/
             │   ├── ChangePasswordActivity.java
             │   ├── HotkeySetupActivity.java
             │   ├── AppPickerDialog.java          # Activity выбора приложений
-            │   ├── CreateShortcutActivity.java   # ACTION_CREATE_SHORTCUT
-            │   ├── LokkerViewModel.java          # не используется (MainActivity наблюдает DAO напрямую)
-            │   └── adapter/ (LokkerAppsAdapter, AppPickerAdapter)  # не используются — адаптеры встроены в активности
+            │   └── CreateShortcutActivity.java   # ACTION_CREATE_SHORTCUT
+            │   (адаптеры RecyclerView встроены в активности)
             ├── domain/
             │   ├── AppRepository.java            # единый источник истины (синглтон)
             │   ├── AuthManager.java              # PBKDF2, счётчик, блокировка
@@ -1162,8 +1156,6 @@ Lokker/
                 ├── LokkerPrefs.java
                 └── db/ (LokkerDatabase, LokkerApp, HotkeyMap, LokkerAppDao, HotkeyMapDao, Converters)
 ```
-
-> Лишний файл `src/main/res/values/styles.xml` в корне репозитория (вне `app/`) в сборке не участвует.
 
 ---
 
@@ -1190,7 +1182,7 @@ Lokker/
 | Приложение в режиме «до закрытия», пользователь смахивает задачу | Приложение скрывается (в пределах ~3 с) | `onTaskRemoved` / опрос 3 с → `checkRehideOnClose()` → `rehideClosedApp()` |
 | Скрытое приложение пытается отправить уведомление | **Невозможно** — скрытое приложение не может работать | `setApplicationHiddenSetting` блокирует запуск всех компонентов |
 | Скрытое приложение обновлено системой | Остаётся скрытым | Система сохраняет состояние; `PackageMonitor` повторно применяет скрытие |
-| Lokker переустановлен/обновлён | Lokker виден в лаунчере, `self_hidden` сброшен | `PackageMonitor` обнаруживает свой пакет; alias возвращается к значению из манифеста |
+| Lokker переустановлен/обновлён | Переключатель самоскрытия совпадает с фактической видимостью иконки | `isSelfHidden()` читает состояние компонента alias |
 | Устройство перезагружается | Все скрытые приложения остаются скрытыми | `packages.xml`; `BootReceiver` повторно применяет скрытие |
 | Экран включается | Состояние скрытия перепроверено | `ScreenReceiver` (SCREEN_ON) |
 | Процесс Lokker убит во время раскрытия (любого режима) | **Приложение повторно скрывается при следующем старте процесса** | `pending_rehide` / `pending_rehide_on_close` → `recoverLeakedApps()` |
@@ -1247,7 +1239,9 @@ Lokker/
 > - `Lokker-v1.1` (125aecf): режим «до закрытия», удаление динамических ярлыков, жесты горячих клавиш (долгое/двойное/тройное/удержание);
 > - `Lokker-v1.2a` (60245e6): ускорение обработки горячих клавиш и подавление автоповторов.
 >
-> После v1.2a добавлено развёртывание через `android_app_import` (f23f430). Ниже исходный план, сохранён для истории.
+> - v1.2b: развёртывание через `android_app_import` (f23f430); исправлено состояние переключателя самоскрытия (теперь читается из компонента `LokkerLauncher`); удалён неиспользуемый код (импорт/экспорт, ViewModel, адаптеры, layout-файлы).
+>
+> Ниже исходный план, сохранён для истории.
 
 ### Фаза 1 — Фундамент (~3 дня)
 - Каркас модуля AOSP: `Android.bp` (с `platform_apis: true`), манифест, интеграция сборки

@@ -617,7 +617,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
             name = "3\u00d7 " + keyName;
         } else if (HotkeyManager.isDoublePress(keyCode)) {
             name = "2\u00d7 " + keyName;
-        } else if (keyCode < 0) {
+        } else if (HotkeyManager.isLongPress(keyCode)) {
             name = "LONG " + keyName;
         } else {
             name = keyName;
@@ -654,7 +654,7 @@ public class HotkeySetupActivity extends AppCompatActivity {
                 sb.append("3\u00d7 ").append(keyName);
             } else if (HotkeyManager.isDoublePress(kc)) {
                 sb.append("2\u00d7 ").append(keyName);
-            } else if (kc < 0) {
+            } else if (HotkeyManager.isLongPress(kc)) {
                 sb.append("LONG ").append(keyName);
             } else {
                 sb.append(keyName);

@@ -1,13 +1,10 @@
 package com.lokker.app.domain;
 
-import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
@@ -19,11 +16,7 @@ import android.graphics.drawable.Icon;
 import android.os.IBinder;
 import android.util.Log;
 
-import androidx.lifecycle.LiveData;
-
-import com.lokker.app.R;
 import com.lokker.app.data.LokkerPrefs;
-import com.lokker.app.data.db.Converters;
 import com.lokker.app.data.db.HotkeyMap;
 import com.lokker.app.data.db.HotkeyMapDao;
 import com.lokker.app.data.db.LokkerApp;
@@ -32,14 +25,12 @@ import com.lokker.app.data.db.LokkerDatabase;
 
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +49,6 @@ public class AppRepository {
     private static final String KEY_PENDING_REHIDE = "pending_rehide";
     private static final String KEY_PENDING_REHIDE_ON_CLOSE = "pending_rehide_on_close";
     private static final String KEY_UNHIDE_ALL_SNAPSHOT = "unhide_all_snapshot";
-    private static final String KEY_SELF_HIDDEN = "self_hidden";
 
     private static volatile AppRepository INSTANCE;
 
@@ -104,7 +94,7 @@ public class AppRepository {
     /**
      * Add an application to Lokker's managed list.  Caches the icon and
      * label (which must happen before the app is hidden), inserts a Room
-     * record, and updates dynamic shortcuts.  Does <b>not</b> hide the
+     * record.  Does <b>not</b> hide the
      * app; call {@link #hideApp(String)} separately.
      */
     public void addApplication(String packageName) {
@@ -119,7 +109,6 @@ public class AppRepository {
                 System.currentTimeMillis()
         );
         appDao.insert(record);
-
     }
 
     /**
@@ -148,18 +137,6 @@ public class AppRepository {
 
         setApplicationHiddenSetting(packageName, true);
         appDao.setHidden(packageName, true);
-    }
-
-    /**
-     * Unhide a managed application permanently.  The app reappears in the
-     * launcher/Settings but remains in Lokker's managed list.
-     */
-    public void unhideApp(String packageName) {
-        LokkerApp record = appDao.get(packageName);
-        if (record == null) return;
-
-        setApplicationHiddenSetting(packageName, false);
-        appDao.setHidden(packageName, false);
     }
 
     /**
@@ -282,30 +259,6 @@ public class AppRepository {
     }
 
     /**
-     * Remove a package from the Recents list using
-     * {@code ActivityManager.removeTask()}.
-     */
-    public void removeFromRecents(String packageName) {
-        ActivityManager am = ctx.getSystemService(ActivityManager.class);
-        if (am == null) return;
-
-        @SuppressWarnings("deprecation")
-        List<ActivityManager.RecentTaskInfo> tasks = am.getRecentTasks(100, 0);
-        for (ActivityManager.RecentTaskInfo task : tasks) {
-            if (task.baseIntent != null
-                    && task.baseIntent.getComponent() != null
-                    && packageName.equals(task.baseIntent.getComponent().getPackageName())) {
-                try {
-                    Method removeTask = ActivityManager.class.getMethod("removeTask", int.class);
-                    removeTask.invoke(am, task.id);
-                } catch (Exception ignored) {
-                    // Not available on all API levels or permission denied
-                }
-            }
-        }
-    }
-
-    /**
      * Launch a hidden app with flags that exclude it from Recents.
      * Must call {@link #unhideTemporarily(String)} first so that
      * {@code getLaunchIntentForPackage} can resolve the hidden package.
@@ -368,14 +321,6 @@ public class AppRepository {
     }
 
     // ── Queries ─────────────────────────────────────────────────────────
-
-    /**
-     * @return a {@link LiveData} list of all managed applications, ordered
-     *         by label ascending.
-     */
-    public LiveData<List<LokkerApp>> getAllAppsLive() {
-        return appDao.getAllLive();
-    }
 
     /**
      * @return all currently hidden applications.
@@ -533,133 +478,18 @@ public class AppRepository {
                 : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
 
         pm.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP);
-        prefs.edit().putBoolean(KEY_SELF_HIDDEN, hidden).apply();
     }
 
     /**
      * @return {@code true} if Lokker's launcher icon is currently hidden.
+     *         Reads the alias state from PackageManager rather than a stored
+     *         flag, so it stays correct after an update or reinstall.
      */
     public boolean isSelfHidden() {
-        return prefs.getBoolean(KEY_SELF_HIDDEN, false);
+        ComponentName alias = new ComponentName(ctx, "com.lokker.app.LokkerLauncher");
+        return pm.getComponentEnabledSetting(alias)
+                == PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
     }
-
-    // ── Export / Import ─────────────────────────────────────────────────
-
-    /**
-     * Export the current Lokker configuration as a JSON string.
-     * Includes managed apps, Lokker hotkey, self-hidden flag, and
-     * biometric flag.  Does <b>not</b> export password hash or
-     * pending-rehide state.
-     *
-     * @return a pretty-printed JSON string.
-     */
-    public String exportSettings() {
-        try {
-            JSONObject root = new JSONObject();
-
-            // App list
-            JSONArray apps = new JSONArray();
-            for (LokkerApp app : appDao.getAll()) {
-                JSONObject obj = new JSONObject();
-                obj.put("packageName", app.packageName);
-                obj.put("appLabel", app.appLabel);
-                obj.put("hidden", app.hidden);
-                if (app.hotkeySequence != null) {
-                    obj.put("hotkey", new JSONArray(app.hotkeySequence));
-                }
-                apps.put(obj);
-            }
-            root.put("apps", apps);
-
-            // Lokker hotkey
-            HotkeyMap hk = hotkeyMapDao.get();
-            if (hk != null && hk.lokkerHotkey != null) {
-                root.put("lokkerHotkey", new JSONArray(hk.lokkerHotkey));
-            }
-
-            // Settings
-            root.put("selfHidden", prefs.getBoolean(KEY_SELF_HIDDEN, false));
-            root.put("biometricEnabled",
-                    prefs.getBoolean(LokkerPrefs.KEY_BIOMETRIC_ENROLLED, false));
-            root.put("version", 1);
-
-            return root.toString(2);
-        } catch (JSONException e) {
-            throw new RuntimeException("Failed to export settings", e);
-        }
-    }
-
-    /**
-     * Import Lokker configuration from a JSON string.  Replaces all
-     * current data.  Packages not installed on the device are silently
-     * skipped.
-     *
-     * @param json the JSON string previously produced by
-     *             {@link #exportSettings()}.
-     * @return the number of applications successfully imported.
-     * @throws JSONException if the JSON is malformed.
-     */
-    public int importSettings(String json) throws JSONException {
-        JSONObject root = new JSONObject(json);
-        JSONArray apps = root.getJSONArray("apps");
-
-        // Clear existing data
-        for (LokkerApp existing : appDao.getAll()) {
-            removeApplication(existing.packageName);
-        }
-
-        int imported = 0;
-        for (int i = 0; i < apps.length(); i++) {
-            JSONObject obj = apps.getJSONObject(i);
-            String pkg = obj.getString("packageName");
-
-            // Skip packages not installed on this device
-            try {
-                pm.getPackageInfo(pkg, 0);
-            } catch (PackageManager.NameNotFoundException e) {
-                continue;
-            }
-
-            addApplication(pkg);
-            if (obj.optBoolean("hidden", false)) {
-                hideApp(pkg);
-            }
-
-            // Per-app hotkey
-            if (obj.has("hotkey")) {
-                JSONArray hkArr = obj.getJSONArray("hotkey");
-                List<Integer> seq = new ArrayList<>();
-                for (int j = 0; j < hkArr.length(); j++) {
-                    seq.add(hkArr.getInt(j));
-                }
-                appDao.setHotkey(pkg, Converters.fromIntList(seq));
-            }
-            imported++;
-        }
-
-        // Lokker hotkey
-        if (root.has("lokkerHotkey")) {
-            JSONArray hkArr = root.getJSONArray("lokkerHotkey");
-            List<Integer> seq = new ArrayList<>();
-            for (int i = 0; i < hkArr.length(); i++) {
-                seq.add(hkArr.getInt(i));
-            }
-            HotkeyMap hk = new HotkeyMap();
-            hk.lokkerHotkey = seq;
-            hotkeyMapDao.insertOrUpdate(hk);
-        }
-
-        // Settings
-        prefs.edit()
-                .putBoolean(KEY_SELF_HIDDEN, root.optBoolean("selfHidden", false))
-                .putBoolean(LokkerPrefs.KEY_BIOMETRIC_ENROLLED,
-                        root.optBoolean("biometricEnabled", false))
-                .apply();
-
-        return imported;
-    }
-
-    // ── Dynamic shortcuts (appear on long-press of Lokker icon) ────────
 
     // ── Icon caching ────────────────────────────────────────────────────
 

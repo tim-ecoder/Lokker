@@ -5,14 +5,12 @@
     <!-- PIN Screen -->
     <string name="pin_title">Lokker</string>
     <string name="pin_subtitle">Enter PIN to continue</string>
-    <string name="wrong_pin">Wrong PIN</string>
     <string name="lockout_msg">Try again in %d sec.</string>
     <string name="attempt_count">Wrong PIN (attempt %d/5)</string>
 
     <!-- Biometric -->
     <string name="biometric_title">Lokker</string>
     <string name="biometric_subtitle">Authenticate to continue</string>
-    <string name="biometric_confirmed">Biometric confirmed</string>
 
     <!-- Main Screen -->
     <string name="main_search_hint">Filter apps\u2026</string>
@@ -54,18 +52,6 @@
     <string name="unhide_all_desc">Temporarily show all hidden apps</string>
     <string name="hide_all">Hide all apps</string>
     <string name="hide_all_desc">Re-hide previously unhidden apps</string>
-
-    <!-- Settings: Data -->
-    <string name="section_data">Data</string>
-    <string name="export_settings">Export settings</string>
-    <string name="export_desc">Save configuration to file</string>
-    <string name="import_settings">Import settings</string>
-    <string name="import_desc">Load configuration from file</string>
-    <string name="import_confirm_title">Import settings?</string>
-    <string name="import_confirm_msg">This will replace current settings. Apps not installed on the device will be skipped. Continue?</string>
-    <string name="export_success">Settings exported</string>
-    <string name="import_success">Settings imported (%d apps)</string>
-    <string name="import_error">Import error: invalid file format</string>
 
     <!-- Settings: About -->
     <string name="section_about">About</string>
@@ -125,13 +111,10 @@
 
     <!-- Accessibility -->
     <string name="accessibility_service_desc">Lokker uses this service to track hotkeys and manage hidden apps.</string>
-    <string name="ctx_menu">Menu</string>
-    <string name="already_hidden">Hidden</string>
 
     <!-- Common -->
     <string name="cancel">Cancel</string>
     <string name="confirm">Confirm</string>
     <string name="save">Save</string>
-    <string name="reset">Reset</string>
     <string name="apps_hidden_count" formatted="false">%d %s hidden</string>
 </resources>

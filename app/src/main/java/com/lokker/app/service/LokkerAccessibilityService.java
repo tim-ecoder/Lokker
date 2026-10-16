@@ -721,14 +721,4 @@ public class LokkerAccessibilityService extends AccessibilityService {
             Log.w(TAG, "Vibration failed", e);
         }
     }
-
-    // ── Public API for other components ─────────────────────────────────
-
-    /**
-     * @return the package name currently detected in the foreground,
-     *         or {@code null} if unknown.
-     */
-    public String getCurrentForegroundPkg() {
-        return currentForegroundPkg;
-    }
 }

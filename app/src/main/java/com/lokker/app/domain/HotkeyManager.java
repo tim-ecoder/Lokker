@@ -179,14 +179,6 @@ public class HotkeyManager {
         return true;
     }
 
-    /**
-     * Convenience method: check whether the internal buffer ends with
-     * {@code needle}.
-     */
-    public boolean bufferEndsWith(List<Integer> needle) {
-        return endsWith(buffer, needle);
-    }
-
     // ── Configuration retrieval ─────────────────────────────────────────
 
     /**

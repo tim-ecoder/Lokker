@@ -1,6 +1,5 @@
 package com.lokker.app.ui;
 
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -38,13 +37,13 @@ import java.util.List;
  *   - Security: self-hide toggle, password, biometric toggle
  *   - Hotkeys: navigate to HotkeySetupActivity
  *   - Management: unhide all / hide all
- *   - Data: export / import settings
  *   - About: app name, version, platform
  */
 public class SettingsActivity extends AppCompatActivity {
 
     private LokkerPrefs prefs;
     private AuthManager authManager;
+    private AppRepository repo;
     private LokkerDatabase db;
     private View rootView;
 
@@ -56,6 +55,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         prefs = LokkerPrefs.getInstance(this);
         authManager = new AuthManager(prefs);
+        repo = AppRepository.getInstance(this);
         db = LokkerDatabase.getInstance(this);
 
         rootView = buildUi();
@@ -104,7 +104,7 @@ public class SettingsActivity extends AppCompatActivity {
         addSwitchItem(content,
                 R.string.self_hide_label,
                 R.string.self_hide_desc,
-                prefs.isStealthMode(),
+                repo.isSelfHidden(),
                 (buttonView, isChecked) -> {
                     if (isChecked) {
                         // Check hotkey is set first
@@ -122,7 +122,7 @@ public class SettingsActivity extends AppCompatActivity {
                             });
                         }).start();
                     } else {
-                        setSelfHidden(false);
+                        setSelfHidden(buttonView, false);
                     }
                 });
 
@@ -347,25 +347,28 @@ public class SettingsActivity extends AppCompatActivity {
         new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle(R.string.self_hide_confirm_title)
                 .setMessage(R.string.self_hide_confirm_msg)
-                .setPositiveButton(R.string.confirm, (d, w) -> setSelfHidden(true))
+                .setPositiveButton(R.string.confirm, (d, w) -> setSelfHidden(toggle, true))
                 .setNegativeButton(R.string.cancel, (d, w) -> toggle.setChecked(false))
                 .setOnCancelListener(d -> toggle.setChecked(false))
                 .show();
     }
 
-    private void setSelfHidden(boolean hidden) {
-        prefs.setStealthMode(hidden);
-        PackageManager pm = getPackageManager();
-        ComponentName alias = new ComponentName(this,
-                getPackageName() + ".LokkerLauncher");
-        pm.setComponentEnabledSetting(alias,
-                hidden ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                       : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP);
-
-        Toast.makeText(this,
-                hidden ? R.string.lokker_hidden : R.string.lokker_visible,
-                Toast.LENGTH_SHORT).show();
+    private void setSelfHidden(CompoundButton toggle, boolean hidden) {
+        // AppRepository re-checks the hotkey via Room, so run off the main thread
+        new Thread(() -> {
+            try {
+                repo.setSelfHidden(hidden);
+                runOnUiThread(() -> Toast.makeText(this,
+                        hidden ? R.string.lokker_hidden : R.string.lokker_visible,
+                        Toast.LENGTH_SHORT).show());
+            } catch (IllegalStateException e) {
+                runOnUiThread(() -> {
+                    toggle.setChecked(false);
+                    Toast.makeText(this, R.string.hotkey_required,
+                            Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
     }
 
     // ── Unhide all / Hide all ───────────────────────────────────────────

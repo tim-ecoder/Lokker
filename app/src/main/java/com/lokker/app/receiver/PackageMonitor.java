@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.net.Uri;
 import android.util.Log;
 
-import com.lokker.app.data.LokkerPrefs;
 import com.lokker.app.data.db.LokkerApp;
 import com.lokker.app.data.db.LokkerDatabase;
 import com.lokker.app.domain.AppRepository;
@@ -17,10 +16,9 @@ import java.util.concurrent.Executors;
  * Monitors {@code PACKAGE_REPLACED} and {@code PACKAGE_ADDED} intents.
  *
  * <ul>
- *   <li>If the replaced/added package is Lokker itself: reset the
- *       {@code self_hidden} preference to {@code false} so that the launcher
- *       alias state stays consistent after an update/reinstall (the system
- *       resets {@code setComponentEnabledSetting} to the manifest default).</li>
+ *   <li>If the replaced/added package is Lokker itself: ignore it.  The
+ *       self-hide state is read from the launcher alias's component state
+ *       ({@code AppRepository.isSelfHidden()}), so nothing needs resetting.</li>
  *   <li>If the package is a managed hidden app: re-apply the hidden state as
  *       a safety net.  The system normally preserves
  *       {@code setApplicationHiddenSetting} across updates, but this guards
@@ -48,26 +46,9 @@ public class PackageMonitor extends BroadcastReceiver {
         String packageName = data.getSchemeSpecificPart();
         if (packageName == null || packageName.isEmpty()) return;
 
-        if (LOKKER_PACKAGE.equals(packageName)) {
-            handleSelfUpdate(context);
-        } else {
-            handleManagedPackageUpdate(context, packageName);
-        }
-    }
+        if (LOKKER_PACKAGE.equals(packageName)) return;
 
-    /**
-     * Lokker was updated or reinstalled.  The system resets the launcher
-     * activity-alias to the manifest default (enabled), so clear the
-     * {@code self_hidden} flag to keep prefs consistent.
-     */
-    private void handleSelfUpdate(Context context) {
-        Log.i(TAG, "Lokker package updated/reinstalled -- resetting self_hidden pref");
-        try {
-            LokkerPrefs prefs = LokkerPrefs.getInstance(context);
-            prefs.putBoolean("self_hidden", false);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to reset self_hidden preference", e);
-        }
+        handleManagedPackageUpdate(context, packageName);
     }
 
     /**

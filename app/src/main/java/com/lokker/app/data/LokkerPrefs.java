@@ -10,23 +10,21 @@ import java.security.GeneralSecurityException;
 /**
  * Encrypted SharedPreferences wrapper for Lokker.
  *
- * Keys:
- *   "onboarding_complete"  (boolean) - true after the user finishes first-run setup
- *   "service_enabled"      (boolean) - true when the accessibility service is active
- *   "biometric_enrolled"   (boolean) - true when biometric authentication is enrolled
- *   "stealth_mode"         (boolean) - true when stealth/decoy mode is enabled
- *   "theme"                (String)  - UI theme preference ("light", "dark", "system")
+ * Keys (owners in parentheses):
+ *   "pw_hash"                 (String)    - PBKDF2 hash, Base64(salt):Base64(hash) (AuthManager)
+ *   "fail_count"              (String)    - consecutive failed PIN attempts (AuthManager)
+ *   "lockout_until"           (String)    - lockout end, epoch ms (AuthManager)
+ *   "biometric_enrolled"      (boolean)   - biometric unlock enabled (Settings / AuthActivity)
+ *   "pending_rehide"          (StringSet) - temporarily unhidden packages (AppRepository)
+ *   "pending_rehide_on_close" (StringSet) - "unhide until closed" packages (AppRepository)
+ *   "unhide_all_snapshot"     (String)    - JSON array for "Hide all apps" (AppRepository)
  */
 public class LokkerPrefs {
 
     private static final String PREFS_FILE = "lokker_secure_prefs";
 
     // Preference keys
-    public static final String KEY_ONBOARDING_COMPLETE = "onboarding_complete";
-    public static final String KEY_SERVICE_ENABLED = "service_enabled";
     public static final String KEY_BIOMETRIC_ENROLLED = "biometric_enrolled";
-    public static final String KEY_STEALTH_MODE = "stealth_mode";
-    public static final String KEY_THEME = "theme";
 
     private static volatile LokkerPrefs INSTANCE;
     private final SharedPreferences prefs;
@@ -76,44 +74,12 @@ public class LokkerPrefs {
         prefs.edit().putString(key, value).apply();
     }
 
-    public boolean isOnboardingComplete() {
-        return getBoolean(KEY_ONBOARDING_COMPLETE, false);
-    }
-
-    public void setOnboardingComplete(boolean complete) {
-        putBoolean(KEY_ONBOARDING_COMPLETE, complete);
-    }
-
-    public boolean isServiceEnabled() {
-        return getBoolean(KEY_SERVICE_ENABLED, false);
-    }
-
-    public void setServiceEnabled(boolean enabled) {
-        putBoolean(KEY_SERVICE_ENABLED, enabled);
-    }
-
     public boolean isBiometricEnrolled() {
         return getBoolean(KEY_BIOMETRIC_ENROLLED, false);
     }
 
     public void setBiometricEnrolled(boolean enrolled) {
         putBoolean(KEY_BIOMETRIC_ENROLLED, enrolled);
-    }
-
-    public boolean isStealthMode() {
-        return getBoolean(KEY_STEALTH_MODE, false);
-    }
-
-    public void setStealthMode(boolean enabled) {
-        putBoolean(KEY_STEALTH_MODE, enabled);
-    }
-
-    public String getTheme() {
-        return getString(KEY_THEME, "system");
-    }
-
-    public void setTheme(String theme) {
-        putString(KEY_THEME, theme);
     }
 
     /**

@@ -2,7 +2,7 @@
 
 Android system app for hiding applications at the OS level. Built for LineageOS 22 / Android 15 devices where it runs as a privileged, platform-signed system app.
 
-Current version: **v1.2a**. Full specification (in Russian, kept in sync with the code): [SPEC.md](SPEC.md).
+Current version: **v1.2b**. Full specification (in Russian, kept in sync with the code): [SPEC.md](SPEC.md).
 
 ## Features
 
@@ -103,7 +103,7 @@ Note: the signing config points to a hard-coded keystore path (`D:/Programming/k
 ```bash
 adb root
 adb remount
-adb push Lokker-v1.2a.apk /system/system_ext/priv-app/Lokker/Lokker.apk
+adb push Lokker-v1.2b.apk /system/system_ext/priv-app/Lokker/Lokker.apk
 adb push deployment/com.lokker.app.privapp-permissions.xml /system/system_ext/etc/permissions/
 adb reboot
 ```

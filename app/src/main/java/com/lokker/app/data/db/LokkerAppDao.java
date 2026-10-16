@@ -22,9 +22,6 @@ public interface LokkerAppDao {
     @Query("SELECT EXISTS(SELECT 1 FROM lokker_apps WHERE packageName = :packageName)")
     boolean isManaged(String packageName);
 
-    @Query("SELECT EXISTS(SELECT 1 FROM lokker_apps WHERE packageName = :packageName AND hidden = 1)")
-    boolean isHidden(String packageName);
-
     @Query("SELECT * FROM lokker_apps WHERE hidden = 1 ORDER BY appLabel ASC")
     List<LokkerApp> getAllHidden();
 
@@ -42,7 +39,4 @@ public interface LokkerAppDao {
 
     @Query("DELETE FROM lokker_apps WHERE packageName = :packageName")
     void delete(String packageName);
-
-    @Query("DELETE FROM lokker_apps")
-    void deleteAll();
 }

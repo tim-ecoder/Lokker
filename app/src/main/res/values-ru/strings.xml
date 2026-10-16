@@ -5,14 +5,12 @@
     <!-- PIN Screen -->
     <string name="pin_title">Lokker</string>
     <string name="pin_subtitle">Введите PIN для продолжения</string>
-    <string name="wrong_pin">Неверный PIN</string>
     <string name="lockout_msg">Повторите через %d сек.</string>
     <string name="attempt_count">Неверный PIN (попытка %d/5)</string>
 
     <!-- Biometric -->
     <string name="biometric_title">Lokker</string>
     <string name="biometric_subtitle">Аутентифицируйтесь для продолжения</string>
-    <string name="biometric_confirmed">Биометрия подтверждена</string>
 
     <!-- Main Screen -->
     <string name="main_search_hint">Фильтр приложений…</string>
@@ -54,18 +52,6 @@
     <string name="unhide_all_desc">Временно показать все скрытые приложения</string>
     <string name="hide_all">Скрыть все приложения</string>
     <string name="hide_all_desc">Повторно скрыть ранее раскрытые приложения</string>
-
-    <!-- Settings: Data -->
-    <string name="section_data">Данные</string>
-    <string name="export_settings">Экспорт настроек</string>
-    <string name="export_desc">Сохранить конфигурацию в файл</string>
-    <string name="import_settings">Импорт настроек</string>
-    <string name="import_desc">Загрузить конфигурацию из файла</string>
-    <string name="import_confirm_title">Импорт настроек?</string>
-    <string name="import_confirm_msg">Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?</string>
-    <string name="export_success">Настройки экспортированы</string>
-    <string name="import_success">Настройки импортированы (%d приложений)</string>
-    <string name="import_error">Ошибка импорта: неверный формат файла</string>
 
     <!-- Settings: About -->
     <string name="section_about">О приложении</string>
@@ -122,13 +108,10 @@
 
     <!-- Accessibility -->
     <string name="accessibility_service_desc">Lokker использует этот сервис для отслеживания горячих клавиш и управления скрытыми приложениями.</string>
-    <string name="ctx_menu">Меню</string>
-    <string name="already_hidden">Скрыто</string>
 
     <!-- Common -->
     <string name="cancel">Отмена</string>
     <string name="confirm">Подтвердить</string>
     <string name="save">Сохранить</string>
-    <string name="reset">Сбросить</string>
     <string name="apps_hidden_count" formatted="false">%d %s скрыто</string>
 </resources>

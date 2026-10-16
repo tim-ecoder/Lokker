@@ -7,7 +7,6 @@
     <color name="colorSurfaceVariant">#1E1E1E</color>
     <color name="colorOnSurface">#E0E0E0</color>
     <color name="colorOnSurfaceMedium">#888888</color>
-    <color name="colorOnSurfaceDim">#666666</color>
     <color name="colorError">#CF6679</color>
     <color name="colorCardBg">#2A2A2A</color>
     <color name="colorDivider">#2A2A2A</color>
