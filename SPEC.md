@@ -3,7 +3,32 @@
 **Пакет:** `com.lokker.app`
 **Целевая платформа:** LineageOS 22 · Android 15 · API 35
 **Язык:** Java
-**Тип:** Привилегированный системный APK (`/system/priv-app`)
+**Тип:** Привилегированный системный APK (`/system/system_ext/priv-app`)
+**Версия реализации:** v1.2a (ветка `claude/lokker-system-app-yTUtg`)
+
+---
+
+## 0. Статус документа и отличия реализации от исходного дизайна
+
+Изначально документ был проектной спецификацией. Теперь он приведён к фактическому состоянию кода v1.2a. Если текст и код расходятся, верен код. Ключевые изменения относительно первоначального дизайна:
+
+| Тема | Исходный дизайн | Фактическая реализация |
+|---|---|---|
+| Сборка | `android_app` из исходников в дереве AOSP | Gradle-сборка APK + `android_app_import` готового APK в образ (Раздел 11) |
+| Вызов скрытого API | Прямой вызов `pm.setApplicationHiddenSetting()` | Рефлексия: `IPackageManager.setApplicationHiddenSettingAsUser()` через `ServiceManager.getService("package")` |
+| Коды номеронабирателя | `*#5655#` | `*#*#565537#*#*` — открыть Lokker; `*#*#5655377469#*#*` — раскрыть **все** скрытые пакеты на устройстве |
+| Горячая клавиша по умолчанию | Громкость↑ Громкость↑ Громкость↓ | Нет значения по умолчанию — пользователь записывает свою |
+| Типы нажатий | Только короткое нажатие | Короткое, долгое (500 мс), двойное и тройное (интервал 400 мс), удержание + следующая клавиша (Раздел 9) |
+| Режимы раскрытия | Только временное (повторное скрытие при уходе с переднего плана) | Временное + **«раскрыть до закрытия»** (повторное скрытие после удаления задачи из недавних) (Раздел 4) |
+| Закреплённые ярлыки | Создаются автоматически в `addApplication()` | **Не создаются.** Вместо них есть `CreateShortcutActivity` (`ACTION_CREATE_SHORTCUT`) для KeyMapper и других переназначателей клавиш |
+| Динамические ярлыки | — | Были добавлены, затем удалены в v1.1: они показывали скрытые приложения в поиске лаунчера |
+| Импорт/экспорт настроек | Секция «Данные» в настройках | UI удалён. Методы `exportSettings()`/`importSettings()` остались в `AppRepository`, но не используются |
+| PBKDF2 | 310 000 итераций | 10 000 итераций. Хеши на 310 000 итераций проверяются как устаревшие и перехешируются при успешном входе |
+| Биометрия | Сначала биометрия, `BIOMETRIC_STRONG \| DEVICE_CREDENTIAL` | Только `BIOMETRIC_STRONG`, по умолчанию выключена, показывается поверх экрана PIN |
+| Включение Accessibility | Вручную | Автоматически в `LokkerApp.onCreate()` через `WRITE_SECURE_SETTINGS` |
+| Добавление из выбора приложений | Только `addApplication()` | `addApplication()` + сразу `hideApp()` |
+| Сообщения пользователю | Snackbar | Toast |
+| Язык UI | Русский | Английский по умолчанию + перевод `values-ru` |
 
 ---
 
@@ -21,7 +46,9 @@
 - **Графический интерфейс для добавления/удаления приложений** в список скрытых (выбор приложений с поиском)
 - Секретная горячая клавиша для доступа к Lokker (**единственная** точка входа, когда Lokker сам скрыт)
 - Секретная горячая клавиша для прямого открытия скрытого приложения
-- Ввод секретного кода через номеронабиратель (`*#5655#`) — опциональный запасной вариант
+- Режим **«раскрыть до закрытия»**: приложение остаётся видимым, пока пользователь не закроет его задачу в недавних
+- Интеграция с переназначателями клавиш (KeyMapper и др.) через `ACTION_CREATE_SHORTCUT`
+- Секретные коды номеронабирателя: `*#*#565537#*#*` (открыть Lokker) и `*#*#5655377469#*#*` (аварийно раскрыть все приложения)
 
 ### Не входит в объём проекта
 
@@ -36,7 +63,7 @@
 
 ## 2. Архитектура
 
-Одномодульное Java-приложение. Паттерн MVVM-lite. Нет внешних зависимостей кроме AndroidX и Security Crypto. Четыре типа компонентов времени выполнения.
+Одномодульное Java-приложение (Gradle, модуль `:app`). Паттерн MVVM-lite. Кроме AndroidX, Material и Security Crypto внешних зависимостей нет. Интерфейс в основном собирается программно в `buildUi()` каждой активности, а не из XML-разметки. Четыре типа компонентов времени выполнения.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -49,6 +76,8 @@
 │ SettingsAct  │              │              │ SecretCodeRx  │
 │ ChangePwAct  │              │              │ ScreenReceiver│
 │ HotkeySetup  │              │              │               │
+│ AppPicker    │              │              │               │
+│ CreateShortcut│             │              │               │
 ├──────────────┴──────────────┴──────────────┴───────────────┤
 │                      Repository                             │
 │              AppRepository (single source of truth)         │
@@ -65,12 +94,14 @@
 
 | Компонент | Тип | Ответственность |
 |---|---|---|
-| `LokkerAccessibilityService` | AccessibilityService | Обнаружение смены приложения на переднем плане через `TaskStackListener` + `TYPE_WINDOW_STATE_CHANGED`; **инициирование повторного скрытия при потере фокуса скрытым приложением**; удаление из списка недавних; обнаружение горячих клавиш |
-| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — повторное применение состояния скрытия после обновлений (дополнительная страховка; система сохраняет состояние скрытия при обновлениях) |
-| `BootReceiver` | BroadcastReceiver | `BOOT_COMPLETED` — проверка состояния всех скрытых приложений (дополнительная страховка; состояние сохраняется в packages.xml) |
-| `ScreenReceiver` | BroadcastReceiver | `SCREEN_ON` — повторная проверка состояния всех скрытых приложений |
-| `SecretCodeReceiver` | BroadcastReceiver | Номеронабиратель `*#5655#` → запуск AuthActivity (опционально — может не работать на всех прошивках) |
-| `AppRepository` | Репозиторий | Единый интерфейс к Room DB + EncryptedSharedPreferences + `setApplicationHiddenSetting` |
+| `LokkerApp` (Application) | Application | При старте: `hidden_api_policy=1`, автоматическое включение Accessibility-сервиса, `recoverLeakedApps()` |
+| `LokkerAccessibilityService` | AccessibilityService | Обнаружение смены приложения на переднем плане через `TYPE_WINDOW_STATE_CHANGED` (основной путь); **повторное скрытие при потере фокуса временно раскрытым приложением**; удаление из списка недавних; проверка приложений в режиме «до закрытия» (+ `TaskStackListener.onTaskRemoved`, опрос раз в 3 с); обнаружение и запись горячих клавиш; динамическая регистрация `ScreenReceiver` |
+| `PackageMonitor` | BroadcastReceiver | `PACKAGE_REPLACED`/`ADDED` — повторное применение состояния скрытия после обновлений (дополнительная страховка); для собственного пакета сбрасывает `self_hidden` |
+| `BootReceiver` | BroadcastReceiver | `BOOT_COMPLETED` — повторное применение скрытия ко всем приложениям с `hidden=1` |
+| `ScreenReceiver` | BroadcastReceiver | `SCREEN_ON` — повторное применение скрытия (регистрируется динамически в сервисе, не в манифесте) |
+| `SecretCodeReceiver` | BroadcastReceiver | `*#*#565537#*#*` → `AuthActivity`; `*#*#5655377469#*#*` → `unhideAllSystemWide()` без аутентификации |
+| `CreateShortcutActivity` | Activity | `ACTION_CREATE_SHORTCUT`: список «Открыть Lokker» + управляемые приложения → возвращает intent ярлыка с кэшированной иконкой |
+| `AppRepository` | Репозиторий (синглтон) | Единый интерфейс к Room DB + EncryptedSharedPreferences + `setApplicationHiddenSettingAsUser` (рефлексия) |
 
 ---
 
@@ -97,11 +128,27 @@
 
 ### Разрешение
 
-`setApplicationHiddenSetting()` требует `MANAGE_USERS` (signature|privileged). Поскольку Lokker собирается с `certificate: "platform"` в дереве AOSP, это разрешение предоставляется автоматически. Также необходимо включение в белый список в `privapp-permissions-lokker.xml`.
+`setApplicationHiddenSetting()` требует `MANAGE_USERS` (signature|privileged). Lokker подписывается платформенным сертификатом (`certificate: "platform"` в `deployment/Android.bp`), поэтому разрешение выдаётся автоматически. Также нужна запись в белом списке `com.lokker.app.privapp-permissions.xml`.
+
+### Реализация вызова
+
+Gradle-сборка компилируется против публичного SDK, поэтому скрытый API вызывается через рефлексию на binder-интерфейсе `IPackageManager`:
+
+```java
+// AppRepository.java
+public static void setApplicationHiddenSetting(String packageName, boolean hidden) {
+    IBinder binder = ServiceManager.getService("package");          // через рефлексию
+    Object ipm = IPackageManager.Stub.asInterface(binder);          // через рефлексию
+    int userId = Process.myUserHandle().hashCode();
+    ipm.setApplicationHiddenSettingAsUser(packageName, hidden, userId); // через рефлексию
+}
+```
+
+`LokkerApp.onCreate()` записывает `Settings.Global.hidden_api_policy = 1`, чтобы рефлексия на скрытых API работала и в release-сборке.
 
 ### addApplication(packageName)
 
-Добавляет приложение в управляемый список Lokker. Приложение теперь защищено паролем — его можно открыть только через Lokker. Кэширует иконку/название, сохраняет в Room и создаёт закреплённый ярлык. **Не** скрывает приложение; для этого вызовите `hideApp()` отдельно.
+Добавляет приложение в управляемый список Lokker: кэширует название и иконку (PNG в `files/icons/`) и сохраняет запись в Room. **Не** скрывает приложение и **не** создаёт ярлыков. Экран выбора приложений сразу после этого вызывает `hideApp()`.
 
 ```java
 // AppRepository.java
@@ -120,31 +167,24 @@ public void addApplication(String packageName) {
         System.currentTimeMillis()
     );
     db.lokkerAppDao().insert(record);
-
-    // Автоматически создаём закреплённый ярлык на домашнем экране
-    createPinnedShortcut(packageName);
 }
 ```
 
 ### removeApplication(packageName)
 
-Полностью удаляет приложение из Lokker. Снимает скрытие если скрыто, удаляет из Room, удаляет закреплённый ярлык, очищает кэшированную иконку. Приложение возвращается в нормальное состояние (больше не защищено паролем).
+Полностью удаляет приложение из Lokker: снимает скрытие, удаляет запись из Room, убирает пакет из `pendingRehide` и `pendingRehideOnClose`, очищает кэшированную иконку. Приложение возвращается в нормальное состояние.
 
 ```java
 // AppRepository.java
 
 public void removeApplication(String packageName) {
-    // Снимаем скрытие на системном уровне, если приложение сейчас скрыто
-    pm.setApplicationHiddenSetting(packageName, false);
+    setApplicationHiddenSetting(packageName, false);
 
-    // Удаляем из Room
-    db.lokkerAppDao().delete(packageName);
+    appDao.delete(packageName);
     pendingRehide.remove(packageName);
     persistPendingRehide();
-
-    // Удаляем закреплённый ярлык
-    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-    sm.disableShortcuts(List.of("lokker_" + packageName));
+    pendingRehideOnClose.remove(packageName);
+    persistPendingRehideOnClose();
 
     // Очищаем кэшированную иконку
     new File(ctx.getFilesDir(), "icons/" + packageName + ".png").delete();
@@ -165,12 +205,7 @@ public void hideApp(String packageName) {
 }
 ```
 
-> **Примечание:** `setApplicationHiddenSetting` — это скрытый API (`@hide`). В сборках AOSP (Android.bp с `platform_apis: true`) он вызывается напрямую. При сборке против заглушек SDK используйте рефлексию:
-> ```java
-> Method m = PackageManager.class.getMethod(
->     "setApplicationHiddenSetting", String.class, boolean.class);
-> m.invoke(pm, packageName, true);
-> ```
+> **Примечание:** здесь и ниже `pm.setApplicationHiddenSetting(...)` в примерах означает статический `AppRepository.setApplicationHiddenSetting(...)` (см. «Реализация вызова» выше).
 
 ### unhideApp(packageName)
 
@@ -205,6 +240,28 @@ public boolean unhideTemporarily(String packageName) {
 }
 ```
 
+### unhideUntilClosed(packageName) — режим «раскрыть до закрытия» (v1.1)
+
+Раскрывает приложение так, что оно **не** скрывается при уходе с переднего плана. Повторное скрытие происходит только после того, как задача приложения исчезнет из списка недавних (пользователь смахнул её). Подробнее см. Раздел 4.
+
+```java
+public boolean unhideUntilClosed(String packageName) {
+    LokkerApp record = appDao.get(packageName);
+    if (record == null || !record.hidden) return false;
+
+    setApplicationHiddenSetting(packageName, false);
+    pendingRehideOnClose.add(packageName);
+    // 5 с льготного периода, чтобы приложение успело создать задачу
+    rehideOnCloseGrace.put(packageName, SystemClock.elapsedRealtime() + 5000);
+    persistPendingRehideOnClose();
+    return true;
+}
+```
+
+Как включается этот режим:
+- Контекстное меню ⋮ → «Раскрыть до закрытия» (пункт показан только для скрытых приложений).
+- Горячая клавиша приложения, если в её настройке включён переключатель «Раскрыть до закрытия» (`LokkerApp.hotkeyUntilClosed`). Работает только при запуске с горячей клавиши (`from_hotkey=true`). Запуск через ярлык или переназначатель клавиш всегда использует временное раскрытие.
+
 ### Сохранение pendingRehide
 
 Набор временно раскрытых приложений **должен** пережить смерть процесса. Если Lokker будет убит, пока приложение временно видимо, оно должно быть повторно скрыто при следующем запуске.
@@ -226,16 +283,26 @@ private void loadPendingRehide() {
     );
 }
 
-/** Вызывается из LokkerApp.onCreate() — повторно скрываем утёкшие приложения */
+/** Вызывается из LokkerApp.onCreate() (в фоновом потоке) — повторно скрываем утёкшие приложения */
 public void recoverLeakedApps() {
     loadPendingRehide();
     for (String pkg : new HashSet<>(pendingRehide)) {
-        pm.setApplicationHiddenSetting(pkg, true);
+        setApplicationHiddenSetting(pkg, true);
         pendingRehide.remove(pkg);
     }
     persistPendingRehide();
+
+    // То же для набора «раскрыть до закрытия»
+    loadPendingRehideOnClose();
+    for (String pkg : new HashSet<>(pendingRehideOnClose)) {
+        setApplicationHiddenSetting(pkg, true);
+        pendingRehideOnClose.remove(pkg);
+    }
+    persistPendingRehideOnClose();
 }
 ```
+
+Набор `pendingRehideOnClose` хранится в ключе `pending_rehide_on_close` так же, как `pending_rehide`.
 
 ### Оставшиеся утечки видимости
 
@@ -254,104 +321,88 @@ public void recoverLeakedApps() {
 
 **Это критически важная поведенческая функция.** Когда скрытое приложение временно разблокировано и пользователь переключается (Home, Назад, Недавние или просто открывает другое приложение), скрытое приложение должно быть немедленно повторно скрыто и удалено из списка недавних.
 
-### Обнаружение — двойной механизм
+### Обнаружение смены переднего плана
 
-Две независимые системы обнаружения переднего плана обеспечивают надёжность:
+#### Основной: AccessibilityService (`TYPE_WINDOW_STATE_CHANGED`)
 
-#### Основной: TaskStackListener (скрытый API AOSP)
-
-Более надёжен, чем AccessibilityService для обнаружения изменений задач/переднего плана. Доступен приложениям, подписанным платформенным сертификатом.
-
-```java
-// LokkerAccessibilityService.java — регистрируется при запуске сервиса
-
-private void registerTaskStackListener() {
-    IActivityTaskManager atm = ActivityTaskManager.getService();
-    atm.registerTaskStackListener(new TaskStackListener() {
-        @Override
-        public void onTaskMovedToFront(ActivityManager.RunningTaskInfo info) {
-            String pkg = info.baseActivity != null
-                ? info.baseActivity.getPackageName() : null;
-            handleForegroundChange(pkg);
-        }
-    });
-}
-```
-
-#### Вспомогательный: AccessibilityService (запасной вариант)
+Фактически работающий механизм. События от `com.android.systemui` и от любых методов ввода (IME, проверка через `InputMethodManager.getInputMethodList()`) игнорируются: иначе шторка или появление клавиатуры ошибочно считались бы уходом из приложения (исправлено в коммите cfb3c72 «apps hiding on keyboard input»).
 
 ```java
 // LokkerAccessibilityService.java
 
-private String currentForegroundPkg = null;
-
 @Override
 public void onAccessibilityEvent(AccessibilityEvent event) {
     if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+    String newPkg = String.valueOf(event.getPackageName());
 
-    CharSequence pkgSeq = event.getPackageName();
-    if (pkgSeq == null) return;
-    String pkg = pkgSeq.toString();
+    if (newPkg.equals("com.android.systemui")) return;
+    if (isInputMethod(newPkg)) return;
 
-    if (!pkg.equals(currentForegroundPkg)) {
-        handleForegroundChange(pkg);
+    if (!newPkg.equals(currentForegroundPkg)) {
+        String previousPkg = currentForegroundPkg;
+        currentForegroundPkg = newPkg;
+
+        // Ушли с временно раскрытого приложения → скрыть и убрать из недавних
+        if (previousPkg != null && repo.isPendingRehide(previousPkg)) {
+            executor.execute(() -> {
+                repo.rehideApp(previousPkg);
+                removeFromRecents(previousPkg);
+            });
+        }
+
+        // Проверка приложений в режиме «до закрытия»
+        if (repo.hasPendingRehideOnClose()) {
+            executor.execute(this::checkRehideOnClose);
+        }
     }
 }
 ```
 
-#### Общая логика повторного скрытия
+#### Вспомогательный: TaskStackListener (скрытый API, best-effort)
 
-```java
-private void handleForegroundChange(String newPkg) {
-    String prev = currentForegroundPkg;
-    currentForegroundPkg = newPkg;
+Регистрируется в `onServiceConnected()` через рефлексию (`ServiceManager.getService("activity_task")` → `IActivityTaskManager.registerTaskStackListener`, слушатель создаётся через `java.lang.reflect.Proxy`). Любая ошибка регистрации только пишется в лог. Используется **только** `onTaskRemoved` → `checkRehideOnClose()`. `onTaskMovedToFront` лишь логируется и не участвует в повторном скрытии.
 
-    if (prev != null && repo.isPendingRehide(prev)) {
-        // Повторное скрытие на системном уровне — полная невидимость восстановлена
-        repo.rehideApp(prev);
-        // Удаление из списка недавних
-        repo.removeFromRecents(prev);
-    }
-}
-```
+#### Режим «раскрыть до закрытия»: checkRehideOnClose()
+
+Выполняется только в потоке `executor`. Для каждого пакета из `pendingRehideOnClose`, у которого прошёл 5-секундный льготный период, проверяется, есть ли его задача в `getRecentTasks(100, RECENT_WITH_EXCLUDED)`. Если задачи нет, пакет скрывается (`rehideClosedApp()`). Пока набор не пуст, работает опрос раз в 3 секунды. Он нужен, потому что смахивание задачи из недавних не всегда даёт accessibility-событие. Когда набор пуст, опрос останавливается.
+
+Триггеры проверки: смена переднего плана, `TaskStackListener.onTaskRemoved`, периодический опрос.
 
 ```java
 // AppRepository.java
 public void rehideApp(String packageName) {
-    pm.setApplicationHiddenSetting(packageName, true);
+    setApplicationHiddenSetting(packageName, true);
     pendingRehide.remove(packageName);
     persistPendingRehide();
 }
 ```
 
-### Удаление из списка недавних (двойной механизм)
+### Запуск и удаление из списка недавних
 
 ```java
-// Механизм 1: Флаги при запуске
-public void launchHiddenApp(String packageName) {
-    // Необходимо снять скрытие перед getLaunchIntentForPackage (скрытые приложения возвращают null)
-    unhideTemporarily(packageName);
-
+// AppRepository.java — вызывающий код ПРЕДВАРИТЕЛЬНО вызывает
+// unhideTemporarily() или unhideUntilClosed() (скрытые приложения
+// возвращают null из getLaunchIntentForPackage)
+public void launchHiddenApp(String packageName, boolean excludeFromRecents) {
     Intent intent = pm.getLaunchIntentForPackage(packageName);
+    if (intent == null) {
+        // Активность лаунчера могла остаться отключённой — вернуть DEFAULT
+        repairDisabledLauncherActivity(packageName);
+        intent = pm.getLaunchIntentForPackage(packageName);
+    }
     if (intent == null) return;
-    intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-    intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+    if (excludeFromRecents) {      // false для режима «до закрытия»
+        intent.addFlags(Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+    }
     ctx.startActivity(intent);
 }
-
-// Механизм 2: ActivityManager.removeTask() при потере фокуса
-public void removeFromRecents(String packageName) {
-    ActivityManager am = ctx.getSystemService(ActivityManager.class);
-    List<ActivityManager.RecentTaskInfo> tasks = am.getRecentTasks(100, 0);
-    for (ActivityManager.RecentTaskInfo task : tasks) {
-        if (task.baseIntent.getComponent() != null
-                && packageName.equals(task.baseIntent.getComponent().getPackageName())) {
-            am.removeTask(task.id);
-        }
-    }
-}
 ```
+
+`AuthActivity` делает паузу между раскрытием и запуском, чтобы PackageManager успел обновить кэш: 150 мс для временного режима и 500 мс для режима «до закрытия».
+
+`LokkerAccessibilityService.removeFromRecents()` убирает задачи пакета в два этапа: сначала `AppTask.finishAndRemoveTask()` для собственных задач, затем рефлексивный `ActivityManager.removeTask(id)` по `getRecentTasks(50, RECENT_WITH_EXCLUDED)`.
 
 ### Диаграмма потока повторного скрытия
 
@@ -363,12 +414,24 @@ public void removeFromRecents(String packageName) {
   → startActivity с флагами EXCLUDE_FROM_RECENTS
   → пользователь нормально использует приложение
   → пользователь нажимает Home / Назад / переключает приложение
-  → TaskStackListener ИЛИ AccessibilityService обнаруживает смену переднего плана
+  → AccessibilityService (TYPE_WINDOW_STATE_CHANGED) обнаруживает смену переднего плана
   → предыдущий пакет был в pendingRehide
   → setApplicationHiddenSetting(pkg, true) — полное повторное скрытие на системном уровне
   → removeFromRecents() — очищает из списка задач
   → pendingRehide очищен и сохранён
   → готово — приложение снова полностью невидимо
+```
+
+```
+Режим «раскрыть до закрытия»
+  → ⋮ «Раскрыть до закрытия» ИЛИ горячая клавиша приложения с hotkeyUntilClosed=true
+  → (для горячей клавиши — аутентификация)
+  → unhideUntilClosed() — pendingRehideOnClose + льготный период 5 с
+  → startActivity БЕЗ EXCLUDE_FROM_RECENTS (задача видна в недавних)
+  → пользователь свободно переключается между приложениями — скрытия нет
+  → пользователь смахивает задачу из недавних
+  → onTaskRemoved / смена переднего плана / опрос 3 с → checkRehideOnClose()
+  → задачи нет в getRecentTasks → rehideClosedApp() — приложение снова скрыто
 ```
 
 ### Восстановление после смерти процесса
@@ -379,7 +442,9 @@ public void removeFromRecents(String packageName) {
 
 ## 5. Самоскрытие и секретный вход
 
-Lokker может скрыть себя из лаунчера через **переключатель** в Настройках. При самоскрытии иконка приложения полностью исчезает — **единственный** способ открыть Lokker — через настроенную горячую клавишу (по умолчанию: Громкость↑ Громкость↑ Громкость↓). Секретный код номеронабирателя (`*#5655#`) доступен как опциональный запасной вариант, но горячая клавиша является основной и рекомендуемой точкой входа.
+Lokker может скрыть себя из лаунчера **переключателем** в Настройках. При самоскрытии иконка полностью исчезает. Открыть Lokker можно по настроенной горячей клавише (значения по умолчанию нет: без записанной горячей клавиши самоскрытие запрещено), секретным кодом номеронабирателя `*#*#565537#*#*` или ярлыком «Открыть Lokker» из переназначателя клавиш (`CreateShortcutActivity`).
+
+**Восстановление** (если горячая клавиша забыта): `adb shell pm enable com.lokker.app/.LokkerLauncher`.
 
 ### Псевдонимы в манифесте
 
@@ -390,8 +455,7 @@ Lokker может скрыть себя из лаунчера через **пе�
 <activity
     android:name=".ui.MainActivity"
     android:exported="true"
-    android:excludeFromRecents="true"
-    android:showWhenLocked="false">
+    android:excludeFromRecents="true">
     <intent-filter>
         <action android:name="com.lokker.app.OPEN"/>
         <category android:name="android.intent.category.DEFAULT"/>
@@ -402,7 +466,8 @@ Lokker может скрыть себя из лаунчера через **пе�
 <activity-alias
     android:name=".LokkerLauncher"
     android:targetActivity=".ui.MainActivity"
-    android:enabled="true">
+    android:enabled="true"
+    android:exported="true">
     <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
@@ -415,11 +480,12 @@ Lokker может скрыть себя из лаунчера через **пе�
 Самоскрытие управляется переключателем в настройках. Перед включением система **должна** убедиться, что горячая клавиша Lokker настроена — иначе пользователь заблокирует сам себя.
 
 ```java
+// AppRepository.java
 public void setSelfHidden(boolean hidden) {
     if (hidden) {
-        // Защита: отказ от самоскрытия, если горячая клавиша не настроена
-        HotkeyConfig config = repo.getHotkeyConfig();
-        if (config.getLokkerHotkey() == null || config.getLokkerHotkey().isEmpty()) {
+        // Защита: отказ от самоскрытия, если горячая клавиша Lokker не настроена
+        HotkeyMap hk = hotkeyMapDao.get();
+        if (hk == null || hk.lokkerHotkey == null || hk.lokkerHotkey.isEmpty()) {
             throw new IllegalStateException("Cannot self-hide without a configured hotkey");
         }
     }
@@ -429,9 +495,7 @@ public void setSelfHidden(boolean hidden) {
         ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
         : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
 
-    ctx.getPackageManager().setComponentEnabledSetting(
-        alias, state, PackageManager.DONT_KILL_APP
-    );
+    pm.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP);
     prefs.edit().putBoolean("self_hidden", hidden).apply();
 }
 ```
@@ -451,15 +515,24 @@ if (packageName.equals(ctx.getPackageName())) {
 
 Это предотвращает сценарий, когда настройка говорит «самоскрыт», но псевдоним уже был сброшен системой, и гарантирует, что пользователь всегда сможет найти Lokker в лаунчере после переустановки.
 
-### Секретный вход через номеронабиратель
+### Секретные коды номеронабирателя
 
-Регистрация `*#LOKK#` (`*#5655#`) как секретного кода:
+| Код | Мнемоника | Действие | Аутентификация |
+|---|---|---|---|
+| `*#*#565537#*#*` | LOKKER | Открыть `AuthActivity` → `MainActivity` | Да |
+| `*#*#5655377469#*#*` | LOKKERSHOW | `unhideAllSystemWide()`: `unhideAll()` по списку Lokker, затем раскрытие **всех** пакетов устройства через `IPackageManager.getInstalledApplications(MATCH_UNINSTALLED_PACKAGES)`. Аварийное восстановление, работает даже после очистки данных Lokker | **Нет** |
 
 ```xml
 <receiver android:name=".receiver.SecretCodeReceiver" android:exported="true">
     <intent-filter>
         <action android:name="android.provider.Telephony.SECRET_CODE"/>
-        <data android:scheme="android_secret_code" android:host="5655"/>
+        <action android:name="android.telecom.action.SECRET_CODE"/>
+        <data android:scheme="android_secret_code" android:host="565537"/>
+    </intent-filter>
+    <intent-filter>
+        <action android:name="android.provider.Telephony.SECRET_CODE"/>
+        <action android:name="android.telecom.action.SECRET_CODE"/>
+        <data android:scheme="android_secret_code" android:host="5655377469"/>
     </intent-filter>
 </receiver>
 ```
@@ -468,11 +541,17 @@ if (packageName.equals(ctx.getPackageName())) {
 
 ## 6. Уровень аутентификации
 
-Двухуровневая аутентификация: **хеш пароля** (6-значный PIN или пароль для быстрой разблокировки) + **BiometricPrompt** (отпечаток пальца/лицо).
+Двухуровневая аутентификация: **хеш PIN** (ровно 6 цифр) + опциональный **BiometricPrompt** (отпечаток пальца/лицо).
 
 ### Хранение пароля
 
-Пароль хранится как хеш PBKDF2-HMAC-SHA256 в EncryptedSharedPreferences. (PBKDF2 выбран вместо Argon2 для избежания зависимости от нативной библиотеки в сборке AOSP.)
+PIN хранится как хеш PBKDF2-HMAC-SHA256 в EncryptedSharedPreferences, формат `Base64(salt):Base64(hash)`, соль 16 байт, ключ 256 бит. PBKDF2 выбран вместо Argon2, чтобы не тянуть нативную библиотеку.
+
+**Итерации:** сейчас `ITERATIONS = 10_000`. Изначально было 310 000. `verifyPassword()` сначала проверяет хеш на 10 000 итераций, затем как устаревший на 310 000. При совпадении с устаревшим хешем PIN перехешируется с текущим числом итераций.
+
+Счётчик ошибок и время окончания блокировки хранятся **строками** (`putString`), потому что `LokkerPrefs` предоставляет только методы для boolean и String.
+
+Ниже исходный код из дизайна. Реальный `AuthManager` отличается только числом итераций и проверкой устаревшего хеша.
 
 ```java
 // AuthManager.java
@@ -508,53 +587,34 @@ public boolean verifyPassword(String input) {
 
 ### BiometricPrompt
 
-```java
-public void showBiometric(FragmentActivity activity, Runnable onSuccess, Runnable onFail) {
-    BiometricPrompt prompt = new BiometricPrompt(activity,
-        ContextCompat.getMainExecutor(activity),
-        new BiometricPrompt.AuthenticationCallback() {
-            @Override
-            public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-                onSuccess.run();
-            }
-            @Override
-            public void onAuthenticationError(int errorCode, CharSequence errString) {
-                onFail.run();
-            }
-            @Override
-            public void onAuthenticationFailed() {
-                onFail.run();
-            }
-        }
-    );
-
-    BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Lokker")
-        .setSubtitle("Аутентифицируйтесь для продолжения")
-        .setAllowedAuthenticators(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG
-            | BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        )
-        .build();
-
-    prompt.authenticate(info);
-}
-```
+Реализован прямо в `AuthActivity.showBiometricPrompt()`:
+- Показывается, только если переключатель «Биометрия» включён (`biometric_enrolled`, **по умолчанию выключен**) и `BiometricManager.canAuthenticate(BIOMETRIC_STRONG) == BIOMETRIC_SUCCESS`.
+- Принимается только `BIOMETRIC_STRONG`, без `DEVICE_CREDENTIAL`. Кнопка отмены «Cancel» закрывает диалог и оставляет экран PIN.
+- Ошибки и неудачные попытки биометрии не увеличивают счётчик блокировки.
+- Кнопку на клавиатуре PIN (левый нижний угол) можно нажать, чтобы вызвать биометрию повторно.
 
 ### Поток AuthActivity
 
-1. **AuthActivity запускается** с intent extra `target_package` (если открывается скрытое приложение) или null (открывается Lokker)
-2. **Если пароль не установлен** (`pw_hash` отсутствует) → сразу переход к `MainActivity` (пропуск аутентификации)
-3. **Показывается BiometricPrompt** — сначала отпечаток пальца/лицо
-4. Биометрия не прошла/недоступна → показывается **ввод 6-значного PIN**
-5. Аутентификация успешна + `target_package` задан → `unhideTemporarily()` → `launchHiddenApp()` → `finish()`
-6. Аутентификация успешна + нет цели → `startActivity(MainActivity)` → `finish()`
-7. **Неверный PIN** → визуальная обратная связь (тряска точек, snackbar «Неверный PIN»)
-8. Аутентификация неудачна 5 раз → **блокировка на 30 секунд**, счётчик в EncryptedPrefs. Показывается таймер обратного отсчёта, клавиатура заблокирована.
+1. **Цель запуска** определяется из extra `target_package` либо из data URI `lokker://launch/{package}`. URI надёжнее переживает сериализацию ярлыков и PendingIntent. Если цели нет, открывается сам Lokker.
+2. **Если PIN не установлен** (`pw_hash` отсутствует) → сразу `proceedAfterAuth()`.
+3. Строится экран PIN. Если активна блокировка, сразу запускается таймер обратного отсчёта.
+4. Если биометрия включена → поверх экрана PIN показывается BiometricPrompt.
+5. **Ввод PIN** тремя способами: экранная клавиатура 4×3, аппаратная клавиатура (`KEYCODE_0..9`, `NUMPAD_0..9`, `DEL`, `ENTER`), IME через скрытый `EditText`. Введённые цифры показываются как `*`, пустые позиции как `_`. После 6-й цифры PIN проверяется автоматически.
+6. **Неверный PIN** → тряска индикаторов + Toast «Wrong PIN (attempt N/5)».
+7. **5 неудач** → блокировка на 30 с (`lockout_until`), клавиатура затемнена, таймер «Try again in N sec.».
+8. **Успех** (`proceedAfterAuth()`):
+   - есть цель, `from_hotkey=true` и у приложения `hotkeyUntilClosed=true` → `unhideUntilClosed()` → пауза 500 мс → `launchHiddenApp(pkg, false)`;
+   - есть цель, иначе → `unhideTemporarily()` → пауза 150 мс → `launchHiddenApp(pkg)`;
+   - нет цели и активность вызвана через `startActivityForResult` (из `MainActivity`) → `RESULT_OK`;
+   - нет цели → `MainActivity` с extra `authenticated=true`.
 
-> **Минимальная длина PIN:** 6 цифр. Экран ввода показывает 6 точек-индикаторов.
+### Аутентификация MainActivity
 
-> **Безопасность:** AuthActivity должна иметь `excludeFromRecents="true"` и `showWhenLocked="false"`.
+`MainActivity` при каждом `onResume()` проверяет флаг `authenticated`. Если PIN установлен, а флага нет, запускается `AuthActivity` через `startActivityForResult`. Флаг сбрасывается в `onStop()`, кроме переходов внутри приложения (`navigatingInternally`: настройки, выбор приложений). Поэтому любой выход из Lokker снова требует PIN.
+
+> **Длина PIN:** ровно 6 цифр (`PIN_LENGTH = 6` в `AuthActivity`; `MIN_PASSWORD_LENGTH = 6` и цифровая клавиатура в `ChangePasswordActivity`).
+
+> **Безопасность:** у всех активностей `excludeFromRecents="true"`. `showWhenLocked` не задаётся.
 
 > **Первый запуск:** Пароль устанавливается в Настройках → Безопасность → «Установить пароль». До установки пароля Lokker открывается без аутентификации.
 
@@ -562,152 +622,56 @@ public void showBiometric(FragmentActivity activity, Runnable onSuccess, Runnabl
 
 ## 7. Графический интерфейс — Экран управления приложениями
 
-Основной интерфейс — `MainActivity`, который показывает две вкладки/секции:
+Основной интерфейс — `MainActivity`. Все экраны строятся программно и следуют системной теме (светлой или тёмной). Строки интерфейса на английском (`values/strings.xml`), есть русский перевод (`values-ru/strings.xml`).
 
-### 7.1 Список скрытых приложений (вид по умолчанию)
+### 7.1 Список управляемых приложений (главный экран)
 
-- **Строка поиска** вверху — фильтрует список скрытых приложений по имени/пакету в реальном времени
-- RecyclerView, показывающий все текущие скрытые приложения
-- Каждая строка содержит: **иконка приложения** | **имя приложения** | **имя пакета** (приглушённо) | **кнопка ⋮** (контекстное меню)
-- Нажатие на строку запускает приложение (аутентификация → раскрытие → запуск → повторное скрытие при переключении)
-- Нажатие на кнопку **⋮** открывает контекстное меню с тремя пунктами:
-  - **Назначить горячую клавишу** — открывает диалог записи горячей клавиши для данного приложения (рекордер с бейджами клавиш, кнопки «Сбросить» и «Сохранить»)
-  - **Запустить** — запуск скрытого приложения (аутентификация → временное раскрытие → запуск → повторное скрытие при переключении). Идентично нажатию на строку.
-  - **Удалить из Lokker** — полностью удалить приложение из управления Lokker (раскрытие + удаление из Room + удаление ярлыка + очистка иконки). Показывает диалог подтверждения.
-- **Плавающая кнопка действия (FAB)** → открывает выбор приложений для добавления
-- Пустое состояние: центрированное сообщение "Нет скрытых приложений. Нажмите +, чтобы скрыть приложение." (строка поиска скрыта, когда список пуст)
+- **Панель инструментов**: заголовок «Lokker» и кнопка ⚙ (настройки).
+- **Строка поиска** фильтрует список по имени и пакету в реальном времени.
+- RecyclerView со **всеми управляемыми** приложениями, скрытыми и раскрытыми, отсортированными по `appLabel` (`getAllLive()`).
+- Строка: **иконка** (из кэша) | **имя** | **пакет** (приглушённо) | **кнопка ⋮**.
+- **Нажатие на строку** → Toast «Launching …» → `unhideTemporarily()` → `launchHiddenApp()`. Отдельной аутентификации нет: пользователь уже прошёл её при входе в `MainActivity`.
+- **Кнопка ⋮** → PopupMenu:
+  - **Assign hotkey** — нижняя панель записи горячей клавиши для приложения (см. 7.6);
+  - **Launch** — то же, что нажатие на строку;
+  - **Unhide until closed** — `unhideUntilClosed()` → `launchHiddenApp(pkg, false)`; пункт виден только у скрытых приложений;
+  - **Remove from Lokker** — подтверждение → `removeApplication()`.
+- **FAB +** → `AppPickerDialog`.
+- Пустое состояние: «No hidden apps. Tap + to hide an app.»
 
-### 7.2 Диалог выбора приложений (добавление в список скрытых)
+### 7.2 Выбор приложений (`AppPickerDialog`, отдельная Activity)
 
-Вызывается нажатием FAB. Полноэкранный диалог или нижняя панель:
+- Строка поиска по имени и пакету.
+- По умолчанию в списке только пользовательские приложения. Переключатель «Show system apps» добавляет системные (`FLAG_SYSTEM`).
+- Строка: иконка | имя | пакет | чекбокс, можно выбрать несколько.
+- Уже управляемые приложения показаны с меткой «Hidden» и недоступны для выбора.
+- Кнопка внизу «Hide N app(s)» (без выбора — «Select apps»): для каждого выбранного приложения **`addApplication()` + `hideApp()`**, затем экран закрывается через 600 мс.
 
-- **Строка поиска** вверху — фильтрует по имени приложения или имени пакета
-- RecyclerView со всеми установленными пользовательскими приложениями (по умолчанию без системных)
-- Переключатель: "Показать системные приложения" — включает системные приложения в список
-- Каждая строка: **иконка приложения** | **имя приложения** | **имя пакета** | **чекбокс**
-- Множественный выбор: пользователь может отметить несколько приложений сразу
-- **Кнопка "Скрыть выбранные"** внизу — вызывает `hideApp()` для каждого выбранного приложения
-- Уже скрытые приложения показываются с меткой "Скрыто" и не доступны для выбора
+### 7.3 Экран настроек (`SettingsActivity`)
 
-### 7.3 Экран настроек (доступен через иконку ⚙ на панели инструментов)
+#### Секция «Security»
 
-Отдельный экран с кнопкой «← Назад» и заголовком «Настройки». Элементы сгруппированы по секциям с заголовками:
+- **Hide Lokker from launcher** — переключатель самоскрытия. Если горячая клавиша Lokker не записана, показывается Toast «Set up a hotkey first» и переключатель возвращается назад. Иначе — подтверждение «Lokker will be hidden from the launcher. You can only open it with a hotkey. Continue?».
+- **Set password / Change password** → `ChangePasswordActivity` (см. 7.5). Подпись: «Not set» / «Change PIN or password».
+- **Biometrics** — переключатель `biometric_enrolled`. **По умолчанию выключен.**
 
-#### Секция «Безопасность»
+#### Секция «Hotkeys»
 
-- **Переключатель «Скрыть Lokker из лаунчера»** — при включении иконка Lokker исчезает; доступен только через горячую клавишу. Подпись: "Доступ только через горячую клавишу". Показывает диалог подтверждения: "Lokker будет скрыт из лаунчера. Вы сможете открыть его только горячей клавишей (Громкость↑ Громкость↑ Громкость↓). Продолжить?"
-- **Установить / Сменить пароль** — если пароль не установлен, показывает «Установить пароль» (навигация на экран создания пароля — два поля: новый пароль + подтверждение). Если пароль установлен, показывает «Сменить пароль» (навигация на экран смены пароля — три поля: текущий + новый + подтверждение, см. 7.5). Подпись: «Не установлен» / «Изменить PIN или пароль».
-- **Переключатель «Биометрия»** — включить/выключить биометрическую аутентификацию. Подпись: "Отпечаток пальца или Face Unlock". По умолчанию включён.
+- **Hotkey setup** → `HotkeySetupActivity`. Подпись: «N configured» (сколько всего назначено горячих клавиш) или «Not set».
 
-#### Секция «Горячие клавиши»
+#### Секция «Management»
 
-- **Настройка горячих клавиш** — навигация на экран настройки горячих клавиш (см. 7.7). Подпись показывает текущую последовательность (например, "Громкость↑ Громкость↑ Громкость↓"). Должна быть настроена до включения самоскрытия.
+Два отдельных пункта, каждый с подтверждением:
+- **Unhide all apps** — «This will unhide all N hidden apps…» → `unhideAll()`: сохраняет снимок, раскрывает приложения и очищает оба набора pending.
+- **Hide all apps** — «Re-hide all previously unhidden apps?» → `rehideAll()` по снимку.
 
-#### Секция «Управление»
+#### Секция «Data» — удалена
 
-- **Переключатель «Раскрыть все / Скрыть все»** — одна настройка, переключающаяся между двумя состояниями:
-  - Когда приложения скрыты: показывает **"Раскрыть все приложения"** с подписью "Временно показать все скрытые приложения". Подтверждение: "Это раскроет все N скрытых приложений. Закреплённые ярлыки сохранятся." Вызывает `unhideAll()`, который сохраняет снимок списка и затем раскрывает.
-  - Когда снимок существует (приложения только что раскрыты): показывает **"Скрыть все приложения"** с подписью "Повторно скрыть ранее раскрытые приложения". Подтверждение: "Повторно скрыть все ранее скрытых приложений?" Вызывает `rehideAll()`, который повторно скрывает из снимка.
-  - Не показывается, когда нет скрытых приложений и нет снимка.
+Импорт и экспорт настроек (JSON через `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT`) удалены из интерфейса в коммите f258db7. Методы `AppRepository.exportSettings()` / `importSettings()` и строки `export_*`/`import_*` пока остались в коде, но нигде не вызываются.
 
-#### Секция «Данные»
+#### Секция «About»
 
-- **Экспорт настроек** — сохраняет конфигурацию Lokker в JSON-файл через системный диалог `ACTION_CREATE_DOCUMENT`. Файл содержит: список управляемых приложений (packageName, appLabel, hidden, hotkeySequence), горячую клавишу Lokker, флаг самоскрытия, флаг биометрии. **Не** экспортирует хеш пароля (безопасность) и `pendingRehide` (транзиентное состояние). Подпись: "Сохранить конфигурацию в файл". При успехе — snackbar «Настройки экспортированы».
-- **Импорт настроек** — загружает конфигурацию из JSON-файла через `ACTION_OPEN_DOCUMENT`. Показывает диалог подтверждения: "Это заменит текущие настройки. Приложения, которых нет на устройстве, будут пропущены. Продолжить?" При импорте: очищает текущий список → добавляет приложения из файла (пропускает отсутствующие пакеты) → применяет состояние скрытия → восстанавливает горячие клавиши. При успехе — snackbar «Настройки импортированы (N приложений)». При ошибке — snackbar «Ошибка импорта: неверный формат файла».
-
-```java
-// AppRepository.java
-
-public String exportSettings() {
-    JSONObject root = new JSONObject();
-
-    // Список приложений
-    JSONArray apps = new JSONArray();
-    for (LokkerApp app : db.lokkerAppDao().getAll()) {
-        JSONObject obj = new JSONObject();
-        obj.put("packageName", app.packageName);
-        obj.put("appLabel", app.appLabel);
-        obj.put("hidden", app.hidden);
-        if (app.hotkeySequence != null) {
-            obj.put("hotkey", new JSONArray(app.hotkeySequence));
-        }
-        apps.put(obj);
-    }
-    root.put("apps", apps);
-
-    // Горячая клавиша Lokker
-    HotkeyMap hk = db.hotkeyMapDao().get();
-    if (hk != null && hk.lokkerHotkey != null) {
-        root.put("lokkerHotkey", new JSONArray(hk.lokkerHotkey));
-    }
-
-    // Настройки
-    root.put("selfHidden", prefs.getBoolean("self_hidden", false));
-    root.put("biometricEnabled", prefs.getBoolean("biometric_enabled", true));
-    root.put("version", 1);
-
-    return root.toString(2);
-}
-
-public int importSettings(String json) {
-    JSONObject root = new JSONObject(json);
-    JSONArray apps = root.getJSONArray("apps");
-
-    // Очищаем текущие данные
-    for (LokkerApp existing : db.lokkerAppDao().getAll()) {
-        removeApplication(existing.packageName);
-    }
-
-    int imported = 0;
-    for (int i = 0; i < apps.length(); i++) {
-        JSONObject obj = apps.getJSONObject(i);
-        String pkg = obj.getString("packageName");
-
-        // Пропускаем отсутствующие пакеты
-        try {
-            pm.getPackageInfo(pkg, 0);
-        } catch (PackageManager.NameNotFoundException e) {
-            continue;
-        }
-
-        addApplication(pkg);
-        if (obj.optBoolean("hidden", false)) {
-            hideApp(pkg);
-        }
-
-        // Горячая клавиша приложения
-        if (obj.has("hotkey")) {
-            JSONArray hkArr = obj.getJSONArray("hotkey");
-            List<Integer> seq = new ArrayList<>();
-            for (int j = 0; j < hkArr.length(); j++) seq.add(hkArr.getInt(j));
-            db.lokkerAppDao().setHotkey(pkg, seq);
-        }
-        imported++;
-    }
-
-    // Горячая клавиша Lokker
-    if (root.has("lokkerHotkey")) {
-        JSONArray hkArr = root.getJSONArray("lokkerHotkey");
-        List<Integer> seq = new ArrayList<>();
-        for (int i = 0; i < hkArr.length(); i++) seq.add(hkArr.getInt(i));
-        HotkeyMap hk = new HotkeyMap();
-        hk.lokkerHotkey = seq;
-        db.hotkeyMapDao().insertOrUpdate(hk);
-    }
-
-    // Настройки
-    prefs.edit()
-        .putBoolean("self_hidden", root.optBoolean("selfHidden", false))
-        .putBoolean("biometric_enabled", root.optBoolean("biometricEnabled", true))
-        .apply();
-
-    return imported;
-}
-```
-
-#### Секция «О приложении» (заголовок секции + центрированный блок)
-
-- Центрированный текст: **Lokker**, версия `v1.0.0 · com.lokker.app`, платформа `LineageOS 22 · Android 15`
+- **Lokker** + `versionName` из PackageManager; платформа «LineageOS 22 · Android 15».
 
 ### 7.4 Сводка макета интерфейса
 
@@ -731,9 +695,10 @@ public int importSettings(String json) {
 │                          [+ FAB] │
 └──────────────────────────────────┘
 
-[⋮] = кнопка контекстного меню (→ Назначить горячую клавишу / Запустить / Удалить из Lokker)
+[⋮] = контекстное меню (→ Assign hotkey / Launch / Unhide until closed / Remove from Lokker)
 [+ FAB] = открыть выбор приложений
-Нажатие на строку = запуск приложения (аутентификация → раскрытие → запуск → повторное скрытие)
+Нажатие на строку = временное раскрытие → запуск → повторное скрытие при уходе
+(PIN уже введён при входе в MainActivity)
 ```
 
 #### Главный экран (пустое состояние)
@@ -779,20 +744,20 @@ public int importSettings(String json) {
 Отдельный экран с кнопкой «← Назад» → возврат в настройки.
 
 **Режим создания** (пароль не установлен): Заголовок: «Установить пароль». Два поля ввода:
-- **Новый пароль** — ввод PIN/пароля (мин. 6 символов)
+- **Новый пароль** — 6-значный PIN (цифровая клавиатура, ввод маскируется)
 - **Подтвердите пароль** — повторный ввод для подтверждения
 
 **Режим смены** (пароль установлен): Заголовок: «Сменить пароль». Три поля ввода:
 - **Текущий пароль** — ввод текущего PIN/пароля для подтверждения
-- **Новый пароль** — ввод нового PIN/пароля (мин. 6 символов)
+- **Новый пароль** — новый 6-значный PIN
 - **Подтвердите новый пароль** — повторный ввод для подтверждения
 
 **Валидация:**
-- Текущий пароль неверен → snackbar «Неверный текущий пароль», поле подсвечивается красным
-- Новый пароль < 6 символов → snackbar «Пароль должен содержать минимум 6 символов»
-- Пароли не совпадают → snackbar «Пароли не совпадают»
+- Текущий пароль неверен → Toast «Wrong current password»
+- Новый PIN короче 6 цифр → Toast «PIN must be at least 6 digits»
+- Пароли не совпадают → Toast «Passwords don't match»
 
-Кнопка **«Сохранить»** внизу экрана. При успехе — возврат в настройки + snackbar «Пароль установлен» / «Пароль успешно изменён».
+Кнопка **«Save»** внизу экрана. При успехе: `AuthManager.setPassword()`, Toast «Password set» / «Password changed successfully», возврат в настройки.
 
 ```
 Режим создания:                     Режим смены:
@@ -819,138 +784,71 @@ public int importSettings(String json) {
                                     └──────────────────────────────┘
 ```
 
-### 7.6 Экран настройки горячих клавиш
+### 7.6 Экран настройки горячих клавиш (`HotkeySetupActivity`)
 
-Отдельный экран с кнопкой «← Назад» → возврат в настройки. Заголовок: «Горячие клавиши».
+Запись идёт **через Accessibility-сервис** (`LokkerAccessibilityService.startRecording(listener)`): только он получает аппаратные клавиши, в том числе громкость при выключенном экране приложения. Во время записи клавиши поглощаются и не передаются системе. Исключение — `KEYCODE_BACK`.
 
-#### Секция «Открытие Lokker»
+**Правила записи:**
+- Запись начинается нажатием кнопки «Tap to record a new sequence». Если в течение 5 с нет ни одного нажатия, запись завершается пустой.
+- После каждой клавиши запускается таймер 1.5 с. Когда он истекает, последовательность считается завершённой.
+- Типы нажатий (см. Раздел 9): короткое, `LONG` (≥500 мс), `2×`/`3×` (повтор той же клавиши в пределах 400 мс), `HOLD` (клавиша ещё нажата, когда нажата следующая).
+- Бейджи показывают имя `KeyEvent.keyCodeToString()` без `KEYCODE_` с префиксом типа, например `[VOLUME_UP] [LONG VOLUME_DOWN] [2× CAMERA]`.
+- **Проверка конфликтов:** если такая же последовательность уже назначена Lokker или другому приложению, сохранение отклоняется с Toast «This combination is already assigned: …».
 
-Виджет записи горячей клавиши:
-- Показывает текущую последовательность в виде бейджей клавиш (например, `[Vol ↑] [Vol ↑] [Vol ↓]`)
-- Нажатие запускает режим записи: появляется индикатор «● Нажимайте клавиши...» с пульсирующей красной точкой
-- Подпись: "Нажмите для записи новой последовательности"
-- По завершении записи — snackbar «Горячая клавиша сохранена»
+#### Секция «Open Lokker»
 
-#### Секция «Горячие клавиши приложений»
+Бейджи текущей последовательности (или «Not set») и кнопка записи. По завершении — Toast «Hotkey saved».
 
-Список всех скрытых приложений с назначенными (или неназначенными) горячими клавишами:
-- Каждый элемент: иконка клавиатуры | **имя приложения** | подпись (последовательность или «Не назначена») | стрелка →
-- Нажатие открывает диалог записи горячей клавиши для конкретного приложения
+#### Секция «App hotkeys»
 
-#### Диалог записи горячей клавиши приложения
+Список управляемых приложений: имя и текущая последовательность (или «Not set»). Нажатие открывает нижнюю панель записи.
 
-Вызывается из двух мест:
-1. Контекстное меню ⋮ → «Назначить горячую клавишу» на главном экране
-2. Нажатие на элемент приложения на экране настройки горячих клавиш
+#### Нижняя панель записи горячей клавиши приложения
 
-Bottom sheet диалог с заголовком (имя приложения), виджетом рекордера (бейджи клавиш + индикатор записи), кнопками «Сбросить» и «Сохранить». При сохранении — snackbar «Горячая клавиша для {имя} сохранена».
+Открывается из ⋮ → «Assign hotkey» на главном экране или из списка выше. Содержит заголовок (имя приложения), бейджи и индикатор записи, переключатель **«Unhide until closed»** (`hotkeyUntilClosed`) и кнопки «Reset» / «Save».
 
-```
-┌──────────────────────────────────┐
-│ [←]  Горячие клавиши             │
-├──────────────────────────────────┤
-│ ОТКРЫТИЕ LOKKER                  │
-│ ┌────────────────────────────┐   │
-│ │  [Vol ↑] [Vol ↑] [Vol ↓]  │   │
-│ │                            │   │
-│ │  Нажмите для записи новой  │   │
-│ │  последовательности        │   │
-│ └────────────────────────────┘   │
-│──────────────────────────────────│
-│ ГОРЯЧИЕ КЛАВИШИ ПРИЛОЖЕНИЙ       │
-│                                  │
-│ ⌨ WhatsApp                   [→] │
-│   Не назначена                   │
-│ ⌨ Signal                     [→] │
-│   Vol ↓ Vol ↓ Vol ↑              │
-│ ⌨ Telegram                   [→] │
-│   Не назначена                   │
-└──────────────────────────────────┘
-```
+### 7.7 Ярлыки для переназначателей клавиш (`CreateShortcutActivity`)
 
-### 7.7 Закреплённые ярлыки для скрытых приложений
+> **Изменение относительно дизайна:** закреплённые ярлыки на домашнем экране (`requestPinShortcut`) **не создаются**. Динамические ярлыки (долгое нажатие на иконку Lokker) были реализованы и удалены в v1.1: их было видно в поиске лаунчера, а значит, скрытые приложения выдавали себя.
 
-Lokker **автоматически создаёт закреплённый ярлык на домашнем экране** при добавлении приложения в Lokker через `addApplication()` и **автоматически удаляет его** при удалении приложения через `removeApplication()`. Каждый ярлык проходит через `AuthActivity`, поэтому нажатие на него запускает аутентификацию → раскрытие → запуск → повторное скрытие при переключении. Это также позволяет приложениям для переназначения клавиш (KeyMapper и др.) запускать скрытые приложения без патча фреймворка — переназначатель просто обращается к закреплённому ярлыку.
+Lokker обрабатывает стандартный `Intent.ACTION_CREATE_SHORTCUT`. KeyMapper и похожие приложения показывают Lokker в своём списке «ярлыков приложений»:
 
-#### Автоматическое создание ярлыков
+1. Переназначатель отправляет `ACTION_CREATE_SHORTCUT` → открывается список «Lokker: choose app».
+2. Первым пунктом всегда идёт **«Open Lokker»**, за ним все управляемые приложения.
+3. Выбор → `RESULT_OK` с `EXTRA_SHORTCUT_INTENT`, `EXTRA_SHORTCUT_NAME`, `EXTRA_SHORTCUT_ICON` (кэшированная иконка приложения или иконка Lokker).
+4. Intent ярлыка:
+   - «Open Lokker»: `ACTION_MAIN` → `com.lokker.app.ui.AuthActivity`;
+   - приложение: action `com.lokker.app.LAUNCH_HIDDEN`, data `lokker://launch/{package}`, extra `target_package`, флаги `NEW_TASK | EXCLUDE_FROM_RECENTS`.
+5. При срабатывании ярлыка: `AuthActivity` → аутентификация → **временное** раскрытие → запуск → повторное скрытие при уходе. Флаг `from_hotkey` не передаётся, поэтому режим «до закрытия» здесь не применяется.
 
-Вызывается автоматически из `addApplication()`.
+```xml
+<activity android:name=".ui.AuthActivity"
+    android:excludeFromRecents="true"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="com.lokker.app.LAUNCH_HIDDEN"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:scheme="lokker" android:host="launch"/>
+    </intent-filter>
+</activity>
 
-```java
-// AppRepository.java
-
-public void createPinnedShortcut(String packageName) {
-    LokkerApp record = db.lokkerAppDao().get(packageName);
-    if (record == null) return;
-
-    ShortcutManager sm = ctx.getSystemService(ShortcutManager.class);
-    if (!sm.isRequestPinShortcutSupported()) return;
-
-    // Создаём intent, проходящий через AuthActivity
-    Intent target = new Intent(ctx, AuthActivity.class);
-    target.setAction("com.lokker.app.LAUNCH_HIDDEN");
-    target.putExtra("target_package", packageName);
-
-    // Используем кэшированную иконку, сохранённую до скрытия
-    Icon icon = loadCachedIcon(packageName);  // см. ниже
-    if (icon == null) {
-        icon = Icon.createWithResource(ctx, R.drawable.ic_launcher);
-    }
-
-    ShortcutInfo shortcut = new ShortcutInfo.Builder(ctx, "lokker_" + packageName)
-        .setShortLabel(record.appLabel)
-        .setIcon(icon)
-        .setIntent(target)
-        .build();
-
-    sm.requestPinShortcut(shortcut, null);
-}
+<activity android:name=".ui.CreateShortcutActivity"
+    android:exported="true"
+    android:excludeFromRecents="true">
+    <intent-filter>
+        <action android:name="android.intent.action.CREATE_SHORTCUT"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+    </intent-filter>
+</activity>
 ```
 
-#### Кэширование иконок приложений перед скрытием
+#### Кэширование иконок приложений
 
-Иконки приложений должны быть кэшированы **до** вызова `setApplicationHiddenSetting(true)`, потому что скрытые приложения невидимы для запросов `PackageManager`. Иконки хранятся как PNG-файлы во внутреннем хранилище Lokker.
-
-```java
-// AppRepository.java
-
-private void cacheAppIcon(String packageName) {
-    try {
-        Drawable icon = pm.getApplicationIcon(packageName);
-        Bitmap bmp = drawableToBitmap(icon);
-        File file = new File(ctx.getFilesDir(), "icons/" + packageName + ".png");
-        file.getParentFile().mkdirs();
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
-        }
-    } catch (PackageManager.NameNotFoundException ignored) {}
-}
-
-private Icon loadCachedIcon(String packageName) {
-    File file = new File(ctx.getFilesDir(), "icons/" + packageName + ".png");
-    if (!file.exists()) return null;
-    return Icon.createWithBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
-}
-
-private Bitmap drawableToBitmap(Drawable drawable) {
-    if (drawable instanceof BitmapDrawable) {
-        return ((BitmapDrawable) drawable).getBitmap();
-    }
-    Bitmap bmp = Bitmap.createBitmap(
-        drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(),
-        Bitmap.Config.ARGB_8888);
-    Canvas canvas = new Canvas(bmp);
-    drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-    drawable.draw(canvas);
-    return bmp;
-}
-```
-
-Кэширование иконок и создание ярлыков выполняются в `addApplication()`. Удаление ярлыков и очистка иконок выполняются в `removeApplication()`. См. Раздел 3.
+Скрытые приложения невидимы для `PackageManager`, поэтому иконка сохраняется заранее, в `addApplication()`, в файл `files/icons/{package}.png`. Её используют главный экран, `CreateShortcutActivity` и `loadCachedIcon()`. В `removeApplication()` файл удаляется.
 
 ### unhideAll() / rehideAll()
 
-Используются переключателем скрыть все/раскрыть все в Настройках. Оперируют только флагом `hidden` — приложения остаются в управляемом списке Lokker.
+Используются пунктами «Unhide all apps» / «Hide all apps» в Настройках. Меняют только флаг `hidden`, приложения остаются в управляемом списке Lokker. `unhideAll()` очищает также `pendingRehideOnClose`. Вариант для всей системы, `unhideAllSystemWide()`, описан в Разделе 5.
 
 ```java
 public void unhideAll() {
@@ -963,11 +861,13 @@ public void unhideAll() {
     for (LokkerApp app : hiddenApps) {
         pm.setApplicationHiddenSetting(app.packageName, false);
         db.lokkerAppDao().setHidden(app.packageName, false);
-        // Закреплённые ярлыки и кэшированные иконки остаются на месте
+        // Кэшированные иконки остаются на месте
     }
 
     pendingRehide.clear();
     persistPendingRehide();
+    pendingRehideOnClose.clear();
+    persistPendingRehideOnClose();
 }
 
 public void rehideAll() {
@@ -1022,40 +922,6 @@ public boolean hasUnhideAllSnapshot() {
 }
 ```
 
-#### Обработка в AuthActivity
-
-`AuthActivity` уже поддерживает extras `target_package` (Раздел 6). Intent ярлыка использует действие `com.lokker.app.LAUNCH_HIDDEN` для отличия от других точек входа, но поток аутентификации и запуска идентичен.
-
-#### Добавление в манифест
-
-```xml
-<!-- AuthActivity должна принимать действие ярлыка -->
-<activity android:name=".ui.AuthActivity"
-    android:excludeFromRecents="true"
-    android:showWhenLocked="true">
-    <intent-filter>
-        <action android:name="com.lokker.app.LAUNCH_HIDDEN"/>
-        <category android:name="android.intent.category.DEFAULT"/>
-    </intent-filter>
-</activity>
-```
-
-#### Интеграция с переназначателем клавиш
-
-Пользователь настраивает переназначатель клавиш на запуск закреплённого ярлыка (или явного intent'а `com.lokker.app.LAUNCH_HIDDEN` с extra `target_package`). Никакой прокси-активности, никакого патча фреймворка. Переназначатель запускает стандартный поток аутентификации Lokker.
-
-#### Интерфейс в списке скрытых приложений
-
-Контекстное меню по нажатию на кнопку ⋮ (ярлыки создаются/удаляются автоматически, запуск — по нажатию на строку):
-
-```
-┌──────────────────────────────────┐
-│  ⌨ Назначить горячую клавишу     │
-│  ▶ Запустить                     │
-│  🗑 Удалить из Lokker            │
-└──────────────────────────────────┘
-```
-
 ---
 
 ## 8. Подавление уведомлений
@@ -1070,198 +936,158 @@ public boolean hasUnhideAllSnapshot() {
 
 ## 9. Система горячих клавиш
 
-Обнаружение горячих клавиш выполняется внутри `LokkerAccessibilityService` через `onKeyEvent()`:
+Горячие клавиши обрабатываются в `LokkerAccessibilityService.onKeyEvent()` (флаг `FLAG_REQUEST_FILTER_KEY_EVENTS`, в конфигурации сервиса `canRequestFilterKeyEvents="true"`). Буфер последовательности и сопоставление реализованы в `HotkeyManager`.
+
+### Кодирование типов нажатий
+
+Последовательность хранится как `List<Integer>`. Тип нажатия кодируется в самом числе:
+
+| Тип | Кодирование | Как распознаётся |
+|---|---|---|
+| Короткое | `keyCode` | Нажатие отпущено раньше 500 мс |
+| Долгое (`LONG`) | `-keyCode` | Клавиша удерживается ≥ `LONG_PRESS_MS = 500` |
+| Двойное (`2×`) | `keyCode + 10000` | Повторное нажатие той же клавиши < `DOUBLE_PRESS_MS = 400` после отпускания |
+| Тройное (`3×`) | `keyCode + 20000` | Третье нажатие в том же окне |
+| Удержание (`HOLD`) | `keyCode + 30000` | Клавиша ещё нажата, когда нажимается следующая. Пример: «удерживая Vol↓, нажать Vol↑» = `[VOL_DOWN+30000, VOL_UP]` |
+
+`HotkeyManager.baseKeyCode()` снимает кодирование. По `isLongPress/isDoublePress/isTriplePress/isHold` определяется тип.
+
+### Алгоритм в обычном режиме
+
+1. `onKeyEvent()` выполняется в главном потоке и **никогда не поглощает** клавиши: всегда возвращается `super.onKeyEvent()`, и громкость с вводом работают как обычно.
+2. Быстрый путь: если `keyCode` не встречается ни в одной настроенной горячей клавише (`HotkeyConfig.isHotkeyKey`), событие сразу пропускается дальше.
+3. Остальная обработка уходит в однопоточный `executor`:
+   - автоповторы (`repeatCount > 0`) отбрасываются, иначе удержание клавиши засчитывалось бы как много нажатий;
+   - быстрое повторное нажатие повышает последний элемент буфера до 2× или 3×;
+   - новая клавиша повышает предыдущую, ещё нажатую клавишу до `HOLD`, добавляется в буфер (тайм-аут бездействия 1500 мс очищает буфер) и запускает таймер 500 мс, который повышает её до `LONG`;
+   - после каждого изменения: если буфер — префикс какой-либо горячей клавиши, срабатывает вибрация 100 мс (`USAGE_ALARM`); затем `checkHotkeys()`.
+4. `checkHotkeys()`: сначала проверяется горячая клавиша Lokker (`endsWith`), затем горячие клавиши приложений. При совпадении буфер очищается и вызывается `launchAuth(pkg|null)`.
+5. Отпускание клавиши с `HOLD` в конце буфера очищает буфер.
+
+`HotkeyConfig` кэшируется в сервисе и перечитывается из Room только после `stopRecording()` (флаг `cachedHotkeyConfigStale`).
 
 ```java
-// LokkerAccessibilityService.java
-
-private List<Integer> hotkeySequence = new ArrayList<>();
-private long lastKeyTime = 0L;
-private static final long SEQ_TIMEOUT = 1500L;
-
-@Override
-protected boolean onKeyEvent(KeyEvent event) {
-    if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-
-    long now = SystemClock.elapsedRealtime();
-    if (now - lastKeyTime > SEQ_TIMEOUT) hotkeySequence.clear();
-    lastKeyTime = now;
-
-    hotkeySequence.add(event.getKeyCode());
-
-    HotkeyConfig config = repo.getHotkeyConfig();
-
-    // Горячая клавиша открытия Lokker (например, Громкость↑ Громкость↑ Громкость↓)
-    if (config.getLokkerHotkey() != null && endsWith(hotkeySequence, config.getLokkerHotkey())) {
-        hotkeySequence.clear();
-        launchAuth(null);
-        return true;
-    }
-
-    // Горячие клавиши для отдельных приложений
-    for (Map.Entry<String, List<Integer>> entry : config.getAppHotkeys().entrySet()) {
-        if (endsWith(hotkeySequence, entry.getValue())) {
-            hotkeySequence.clear();
-            launchAuth(entry.getKey());
-            return true;
-        }
-    }
-
-    return false;
-}
-
 private void launchAuth(String targetPackage) {
     Intent intent = new Intent(this, AuthActivity.class);
-    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     if (targetPackage != null) {
+        intent.setData(Uri.parse("lokker://launch/" + targetPackage));
         intent.putExtra("target_package", targetPackage);
     }
+    intent.putExtra("from_hotkey", true);   // учитывает hotkeyUntilClosed
     startActivity(intent);
 }
 ```
 
-| Тип горячей клавиши | По умолчанию | Настраиваемая | Поддерживаемые клавиши |
-|---|---|---|---|
-| Открыть Lokker | Громкость↑ Громкость↑ Громкость↓ | Да | Громкость, Питание (длительное), Камера |
-| Открыть скрытое приложение N | Нет | Да, для каждого приложения | Те же |
-| Код набора номера | `*#5655#` | Да | USSD-стиль `*#XXXX#` |
+### Режим записи
 
-> **Предупреждение:** Клавиши громкости — самые безопасные. Длительное нажатие кнопки питания вызывает системное меню выключения на Android 12+. В конфигурации сервиса доступности требуется `canRequestFilterKeyEvents="true"`.
+`startRecording(listener)` / `stopRecording()` вызываются из `HotkeySetupActivity`. В этом режиме обработка синхронная, а клавиши **поглощаются** (кроме `BACK`). Слушатель получает коды с тем же кодированием, что и в обычном режиме, а `HotkeySetupActivity.upgradeRecordedKey()` собирает из них итоговую последовательность.
+
+| Тип горячей клавиши | По умолчанию | Настраиваемая |
+|---|---|---|
+| Открыть Lokker | **Нет** (обязательна перед самоскрытием) | Да |
+| Открыть приложение N | Нет | Да, для каждого приложения + флаг «до закрытия» |
+| Код номеронабирателя | `*#*#565537#*#*` | Нет (задан в манифесте) |
+
+> **Предупреждение:** надёжнее всего клавиши громкости. Долгое нажатие кнопки питания на Android 12+ открывает системное меню.
+
+> **История исправлений (см. git log):** проверены и исправлены сценарии «короткое / долгое / двойное / тройное нажатие», «удержание + 1–4 клавиши», последовательности; «long key1, long key2»; ввод PIN во время удержания горячей клавиши; ускорение обработки (быстрый путь, executor) и подавление автоповторов при удержании.
 
 ---
 
 ## 10. Слой данных
 
-### База данных Room
+### База данных Room (`lokker_database`, версия 2)
 
 ```java
-// LokkerApp.java — Сущность
-// Представляет приложение, управляемое Lokker. Может находиться в скрытом или видимом состоянии.
-// При добавлении в Lokker приложение требует пароль Lokker для открытия.
-// В скрытом состоянии оно также невидимо на системном уровне.
 @Entity(tableName = "lokker_apps")
 public class LokkerApp {
-    @PrimaryKey @NonNull
-    public String packageName;
+    @PrimaryKey @NonNull public String packageName;
     public String appLabel;
     @TypeConverters(Converters.class)
-    public List<Integer> hotkeySequence; // nullable, горячая клавиша для конкретного приложения
-    public boolean hidden;               // true = скрыто на системном уровне
+    public List<Integer> hotkeySequence;   // nullable; хранится как JSON-строка
+    public boolean hidden;                 // true = скрыто на системном уровне
     public long addedAt;
+    public boolean hotkeyUntilClosed;      // v2: горячая клавиша раскрывает «до закрытия»
 }
 
-// HotkeyMap.java — Сущность
 @Entity(tableName = "hotkey_map")
 public class HotkeyMap {
-    @PrimaryKey
-    public int id = 1;
+    @PrimaryKey public int id = 1;         // одна строка
     @TypeConverters(Converters.class)
     public List<Integer> lokkerHotkey;
 }
-
-// LokkerAppDao.java
-@Dao
-public interface LokkerAppDao {
-    @Query("SELECT * FROM lokker_apps ORDER BY addedAt DESC")
-    LiveData<List<LokkerApp>> getAllLive();
-
-    @Query("SELECT * FROM lokker_apps")
-    List<LokkerApp> getAll();
-
-    @Query("SELECT * FROM lokker_apps WHERE packageName = :pkg")
-    LokkerApp get(String pkg);
-
-    @Query("SELECT COUNT(*) > 0 FROM lokker_apps WHERE packageName = :pkg")
-    boolean isManaged(String pkg);
-
-    @Query("SELECT COUNT(*) > 0 FROM lokker_apps WHERE packageName = :pkg AND hidden = 1")
-    boolean isHidden(String pkg);
-
-    @Query("SELECT * FROM lokker_apps WHERE hidden = 1")
-    List<LokkerApp> getAllHidden();
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    void insert(LokkerApp app);
-
-    @Query("UPDATE lokker_apps SET hidden = :hidden WHERE packageName = :pkg")
-    void setHidden(String pkg, boolean hidden);
-
-    @Query("DELETE FROM lokker_apps WHERE packageName = :pkg")
-    void delete(String pkg);
-
-    @Query("DELETE FROM lokker_apps")
-    void deleteAll();
-}
 ```
 
-### EncryptedSharedPreferences
+**Миграция 1→2:** `ALTER TABLE lokker_apps ADD COLUMN hotkeyUntilClosed INTEGER NOT NULL DEFAULT 0`.
 
-```java
-// LokkerPrefs.java
-public class LokkerPrefs {
-    private static SharedPreferences prefs;
+`LokkerAppDao`: `getAll()` / `getAllLive()` / `getAllHidden()` (сортировка по `appLabel ASC`), `get`, `isManaged`, `isHidden`, `insert` (REPLACE), `setHidden`, `setHotkey(pkg, String json)`, `setHotkeyUntilClosed`, `delete`, `deleteAll`.
+`HotkeyMapDao`: `get()`, `insertOrUpdate()`.
 
-    public static SharedPreferences get(Context ctx) {
-        if (prefs == null) {
-            MasterKey masterKey = new MasterKey.Builder(ctx)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build();
+### EncryptedSharedPreferences (`LokkerPrefs`)
 
-            prefs = EncryptedSharedPreferences.create(
-                ctx,
-                "lokker_secure",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            );
-        }
-        return prefs;
-    }
+Синглтон, файл `lokker_secure_prefs`, MasterKey AES256_GCM, ключи AES256_SIV, значения AES256_GCM. Есть типизированные методы для boolean и String, остальное доступно через `getPrefs()`.
 
-    // Ключи:
-    // "pw_hash"          — PBKDF2-хеш пароля пользователя
-    // "self_hidden"      — boolean
-    // "fail_count"       — int (счётчик неудачных попыток аутентификации)
-    // "lockout_until"    — long (временная метка)
-    // "pending_rehide"    — StringSet (пакеты, временно раскрытые)
-    // "unhide_all_snapshot" — JSON-массив ранее скрытых приложений (для повторного скрытия всех)
-    // ПРИМЕЧАНИЕ: "notif_auto_granted" удалён — NLS больше не нужен
-}
-```
+| Ключ | Тип | Назначение |
+|---|---|---|
+| `pw_hash` | String | `Base64(salt):Base64(hash)` PBKDF2 |
+| `fail_count` | String (число) | Счётчик неудачных попыток |
+| `lockout_until` | String (мс) | Время окончания блокировки |
+| `biometric_enrolled` | boolean | Переключатель «Биометрия» (по умолчанию false) |
+| `self_hidden` | boolean | Lokker скрыт из лаунчера |
+| `pending_rehide` | StringSet | Временно раскрытые пакеты |
+| `pending_rehide_on_close` | StringSet | Пакеты в режиме «до закрытия» |
+| `unhide_all_snapshot` | String (JSON-массив) | Снимок для «Hide all apps» |
+
+> Javadoc класса `LokkerPrefs` и константы `onboarding_complete`, `service_enabled`, `stealth_mode`, `theme` — устаревший каркас, они не используются.
+
+### Файлы
+
+- `files/icons/{package}.png` — кэш иконок.
 
 ---
 
-## 11. Система сборки (AOSP/LineageOS)
+## 11. Система сборки и развёртывание
 
-### Android.bp
+### Gradle-сборка APK
+
+- Gradle 8.8, AGP 8.2.0, `compileSdk 35`, `targetSdk 35`, `minSdk 26`, Java 17.
+- Зависимости: appcompat 1.6.1, recyclerview 1.3.2, material 1.11.0, room 2.6.1 (annotationProcessor), security-crypto 1.1.0-alpha06, biometric 1.2.0-alpha05, lifecycle-viewmodel/livedata 2.7.0, core 1.12.0.
+- `versionName` берётся из `app/build.gradle` (сейчас `1.2a`), имя артефакта — `Lokker-v{versionName}.apk`. `versionName` в манифесте (1.0) переопределяется Gradle.
+- Подпись: путь к keystore прописан жёстко (`D:/Programming/keystores/keystore3.jks`), то есть release собирается на Windows-машине разработчика. При встраивании через `android_app_import` с `certificate: "platform"` система сборки переподписывает APK платформенным ключом прошивки. Без этого signature-разрешения вроде `MANAGE_USERS` выданы не будут.
+
+```bash
+./gradlew assembleRelease
+# → app/build/outputs/apk/release/Lokker-v1.2a.apk
+```
+
+### Встраивание в образ LineageOS (`deployment/`)
+
+Готовый APK кладётся рядом с `deployment/Android.bp` под именем `Lokker.apk`. Модуль импортирует его без компиляции:
 
 ```
-android_app {
+android_app_import {
     name: "Lokker",
-    srcs: ["src/**/*.java"],
-    privileged: true,
+    apk: "Lokker.apk",
     certificate: "platform",
-    platform_apis: true,
-    sdk_version: "",
-    min_sdk_version: "35",
-    static_libs: [
-        "androidx.core_core",
-        "androidx.room_room-runtime",
-        "androidx.security_security-crypto",
-        "androidx.biometric_biometric",
-        "androidx.lifecycle_lifecycle-runtime",
-        "androidx.lifecycle_lifecycle-viewmodel",
-        "androidx.appcompat_appcompat",
-        "androidx.recyclerview_recyclerview",
-        "com.google.android.material_material",
-    ],
-    plugins: ["androidx.room_room-compiler-plugin"],
-    optimize: { enabled: false },
-    resource_dirs: ["res"],
+    privileged: true,
+    system_ext_specific: true,
+    dex_preopt: { enabled: false },
+    required: ["com.lokker.app.privapp-permissions"],
+}
+
+prebuilt_etc {
+    name: "com.lokker.app.privapp-permissions",
+    system_ext_specific: true,
+    sub_dir: "permissions",
+    src: "com.lokker.app.privapp-permissions.xml",
+    filename_from_src: true,
 }
 ```
 
-### privapp-permissions-lokker.xml
+В `device.mk`: `PRODUCT_PACKAGES += Lokker`. Результат — `/system_ext/priv-app/Lokker/Lokker.apk` и `/system_ext/etc/permissions/com.lokker.app.privapp-permissions.xml`.
+
+### com.lokker.app.privapp-permissions.xml
 
 ```xml
 <permissions>
@@ -1269,24 +1095,20 @@ android_app {
         <permission name="android.permission.MANAGE_USERS"/>
         <permission name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
         <permission name="android.permission.REMOVE_TASKS"/>
-        <permission name="android.permission.GET_TASKS"/>
-        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
         <permission name="android.permission.REAL_GET_TASKS"/>
+        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
         <permission name="android.permission.MANAGE_ACTIVITY_STACKS"/>
     </privapp-permissions>
 </permissions>
 ```
 
-> **Примечание:** `MANAGE_USERS` — ключевое разрешение для `setApplicationHiddenSetting()`. `CHANGE_COMPONENT_ENABLED_STATE` сохранено только для самоскрытия Lokker через activity-alias (Раздел 5).
+### Ручная установка (adb, root)
 
-### Интеграция в device.mk
-
-```makefile
-PRODUCT_PACKAGES += Lokker
-
-PRODUCT_COPY_FILES += \
-    packages/apps/Lokker/privapp-permissions-lokker.xml:\
-    $(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-lokker.xml
+```bash
+adb root && adb remount
+adb push Lokker-v1.2a.apk /system/system_ext/priv-app/Lokker/Lokker.apk
+adb push deployment/com.lokker.app.privapp-permissions.xml /system/system_ext/etc/permissions/
+adb reboot
 ```
 
 ---
@@ -1294,63 +1116,54 @@ PRODUCT_COPY_FILES += \
 ## 12. Структура проекта
 
 ```
-packages/apps/Lokker/
-├── Android.bp
-├── AndroidManifest.xml
-├── privapp-permissions-lokker.xml
-├── SPEC.md
-├── res/
-│   ├── drawable/
-│   │   └── ic_launcher.xml
-│   ├── layout/
-│   │   ├── activity_main.xml          # строка поиска + список скрытых приложений + FAB
-│   │   ├── activity_auth.xml          # экран ввода PIN-кода
-│   │   ├── activity_settings.xml      # экран настроек с секциями
-│   │   ├── activity_change_pw.xml     # экран установки/смены пароля
-│   │   ├── activity_hotkey_setup.xml  # запись горячих клавиш + список приложений
-│   │   ├── dialog_app_picker.xml      # полноэкранный выбор приложений
-│   │   ├── item_hidden_app.xml        # строка в списке скрытых приложений (с кнопкой ⋮)
-│   │   └── item_picker_app.xml        # строка в списке выбора приложений
-│   ├── values/
-│   │   ├── strings.xml
-│   │   ├── styles.xml
-│   │   └── colors.xml
-│   └── xml/
-│       └── accessibility_service_config.xml
-└── src/
-    └── com/lokker/app/
-        ├── LokkerApp.java                 # Подкласс Application
-        ├── receiver/
-        │   ├── BootReceiver.java           # BOOT_COMPLETED → повторное применение скрытого состояния
-        │   ├── PackageMonitor.java         # PACKAGE_REPLACED → повторное скрытие
-        │   ├── SecretCodeReceiver.java     # код набора *#5655# → открытие аутентификации
-        │   └── ScreenReceiver.java         # SCREEN_ON → повторная проверка состояний
-        ├── service/
-        │   └── LokkerAccessibilityService.java   # мониторинг переднего плана + повторное скрытие + горячие клавиши + TaskStackListener
-        ├── ui/
-        │   ├── MainActivity.java           # список скрытых приложений, FAB, кнопка настроек
-        │   ├── AuthActivity.java           # шлюз PIN + биометрия
-        │   ├── SettingsActivity.java        # настройки (секции: безопасность, горячие клавиши, управление)
-        │   ├── ChangePasswordActivity.java  # экран установки/смены пароля (два режима)
-        │   ├── HotkeySetupActivity.java    # запись последовательностей клавиш + горячие клавиши приложений
-        │   ├── AppPickerDialog.java        # выбор приложений с поиском (добавление в скрытые)
-        │   ├── LokkerViewModel.java        # LiveData для списка скрытых приложений + фильтр поиска
-        │   └── adapter/
-        │       ├── LokkerAppsAdapter.java  # адаптер RecyclerView для основного списка
-        │       └── AppPickerAdapter.java   # адаптер RecyclerView для списка выбора
-        ├── domain/
-        │   ├── AppRepository.java          # единый источник истины
-        │   ├── AuthManager.java            # пароль + биометрия
-        │   └── HotkeyManager.java          # сопоставление последовательностей
-        └── data/
-            ├── db/
-            │   ├── LokkerDatabase.java     # база данных Room
-            │   ├── LokkerApp.java          # сущность
-            │   ├── HotkeyMap.java          # сущность
-            │   ├── LokkerAppDao.java       # DAO
-            │   └── Converters.java         # TypeConverters (JSON-списки)
-            └── LokkerPrefs.java            # EncryptedSharedPreferences
+Lokker/
+├── SPEC.md                      # этот документ (RU)
+├── Readme.md                    # краткое описание (EN)
+├── mockup.html                  # HTML-макет интерфейса
+├── build.gradle / settings.gradle / gradle.properties / gradlew
+├── deployment/
+│   ├── Android.bp               # android_app_import + prebuilt_etc
+│   └── com.lokker.app.privapp-permissions.xml
+└── app/
+    ├── build.gradle
+    └── src/main/
+        ├── AndroidManifest.xml
+        ├── res/
+        │   ├── drawable/ (ic_launcher.xml, ic_arrow_back.xml)
+        │   ├── layout/   (activity_*.xml, item_*.xml — не используются активностями, UI строится в коде)
+        │   ├── menu/     (main_menu.xml, context_menu.xml)
+        │   ├── values/   (strings.xml EN, colors.xml, styles.xml)
+        │   ├── values-ru/strings.xml
+        │   └── xml/accessibility_service_config.xml
+        └── java/com/lokker/app/
+            ├── LokkerApp.java                    # Application: hidden_api_policy, авто-включение a11y, recoverLeakedApps
+            ├── receiver/
+            │   ├── BootReceiver.java             # BOOT_COMPLETED → повторное скрытие
+            │   ├── PackageMonitor.java           # PACKAGE_REPLACED/ADDED
+            │   ├── SecretCodeReceiver.java       # *#*#565537#*#*, *#*#5655377469#*#*
+            │   └── ScreenReceiver.java           # SCREEN_ON (регистрируется в сервисе)
+            ├── service/
+            │   └── LokkerAccessibilityService.java  # передний план, повторное скрытие, «до закрытия», горячие клавиши, запись
+            ├── ui/
+            │   ├── MainActivity.java             # список, поиск, ⋮-меню, FAB
+            │   ├── AuthActivity.java             # PIN + биометрия + запуск цели
+            │   ├── SettingsActivity.java
+            │   ├── ChangePasswordActivity.java
+            │   ├── HotkeySetupActivity.java
+            │   ├── AppPickerDialog.java          # Activity выбора приложений
+            │   ├── CreateShortcutActivity.java   # ACTION_CREATE_SHORTCUT
+            │   ├── LokkerViewModel.java          # не используется (MainActivity наблюдает DAO напрямую)
+            │   └── adapter/ (LokkerAppsAdapter, AppPickerAdapter)  # не используются — адаптеры встроены в активности
+            ├── domain/
+            │   ├── AppRepository.java            # единый источник истины (синглтон)
+            │   ├── AuthManager.java              # PBKDF2, счётчик, блокировка
+            │   └── HotkeyManager.java            # буфер, кодирование нажатий, HotkeyConfig
+            └── data/
+                ├── LokkerPrefs.java
+                └── db/ (LokkerDatabase, LokkerApp, HotkeyMap, LokkerAppDao, HotkeyMapDao, Converters)
 ```
+
+> Лишний файл `src/main/res/values/styles.xml` в корне репозитория (вне `app/`) в сборке не участвует.
 
 ---
 
@@ -1365,30 +1178,30 @@ packages/apps/Lokker/
 | Пользователь пытается найти Lokker (самоскрытый) | Lokker нигде не виден — ни в лаунчере, ни в недавних, ни в списке приложений в настройках | Alias отключён + `excludeFromRecents` |
 | Первый запуск Lokker (пароль не установлен) | Lokker открывается без аутентификации → пустой главный экран | `AuthActivity` проверяет `pw_hash` — отсутствует → сразу `MainActivity` |
 | Пользователь устанавливает пароль в настройках | Пароль сохранён, следующий запуск требует аутентификации | `ChangePasswordActivity` в режиме создания → `AuthManager.setPassword()` |
-| Пользователь нажимает горячую клавишу (единственный способ войти) | Запрос аутентификации → открывается интерфейс Lokker | Перехват `onKeyEvent` → `AuthActivity` → `MainActivity` |
-| Пользователь запускает скрытое приложение через Lokker | Аутентификация → приложение запускается нормально | `setApplicationHiddenSetting(false)` → `startActivity` → повторное скрытие при переключении |
-| **Пользователь переключается с скрытого приложения** | **Приложение немедленно скрывается, удаляется из недавних** | **`TaskStackListener` + `TYPE_WINDOW_STATE_CHANGED` → `setApplicationHiddenSetting(true)` + `removeTask()`** |
-| Пользователь нажимает Home в скрытом приложении | Приложение скрывается, удаляется из недавних | То же, что выше |
-| Пользователь нажимает Назад для выхода из скрытого приложения | Приложение скрывается, удаляется из недавних | То же, что выше |
-| Пользователь открывает недавние, находясь в скрытом приложении | Приложение скрывается, не видно в недавних | То же + `FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS` |
-| Скрытое приложение пытается отправить уведомление | **Невозможно** — приложение не может работать, пока скрыто | `setApplicationHiddenSetting` блокирует все запуски компонентов |
-| Скрытое приложение обновлено системой | Остаётся скрытым после обновления | Система сохраняет скрытое состояние; `PackageMonitor` как дополнительная проверка |
-| Lokker переустановлен/обновлён | Lokker виден в лаунчере, настройка `self_hidden` сброшена | `PackageMonitor` обнаруживает свой пакет → сбрасывает `self_hidden`; alias возвращается к значению по умолчанию из манифеста (включён) |
-| Устройство перезагружается | Все скрытые приложения остаются скрытыми | `packages.xml` сохраняется; `BootReceiver` проверяет |
-| Процесс Lokker убит во время временного раскрытия | **Приложение повторно скрывается при следующем запуске** | `pendingRehide` сохраняется в EncryptedPrefs; `recoverLeakedApps()` в `Application.onCreate()` |
-| Пользователь добавляет приложение через графический интерфейс выбора | Приложение добавлено в Lokker (защищено паролем), ярлык создаётся автоматически | `addApplication()` → вставка в Room + `createPinnedShortcut()` + обновление LiveData |
-| Пользователь удаляет приложение через графический интерфейс | Приложение удалено из Lokker, раскрыто, ярлык удалён | `removeApplication()` → `setApplicationHiddenSetting(false)` + удаление из Room + отключение ярлыка + очистка иконки |
-| Пользователь скрывает управляемое приложение | Приложение исчезает из лаунчера/настроек | `hideApp()` → `setApplicationHiddenSetting(true)` + `setHidden(true)` |
-| Пользователь раскрывает управляемое приложение | Приложение снова появляется, но остаётся в Lokker (по-прежнему защищено паролем) | `unhideApp()` → `setApplicationHiddenSetting(false)` + `setHidden(false)` |
-| Пользователь нажимает на закреплённый ярлык | Аутентификация → раскрытие → запуск → повторное скрытие при переключении | Intent ярлыка → `AuthActivity` → стандартный процесс запуска |
-| Переназначатель клавиш вызывает ярлык | То же, что нажатие на ярлык — аутентификация → запуск → повторное скрытие | Переназначатель использует intent `com.lokker.app.LAUNCH_HIDDEN` |
-| Пользователь нажимает ⋮ → «Запустить» | Аутентификация → раскрытие → запуск → повторное скрытие при переключении (идентично нажатию на строку) | `unhideTemporarily()` → `launchHiddenApp()` → повторное скрытие через `TaskStackListener` |
-| Пользователь нажимает ⋮ → «Удалить из Lokker» | Диалог подтверждения → приложение полностью удалено из управления Lokker | `removeApplication()` → раскрытие + удаление из Room + удаление ярлыка + очистка иконки |
-| Пользователь нажимает переключатель «Раскрыть все приложения» в настройках | Все скрытые приложения раскрыты, но остаются в Lokker; снимок сохранён; переключатель меняется на «Скрыть все приложения» | `unhideAll()` — сохраняет имена пакетов, устанавливает `hidden=false` для каждого, очищает `pendingRehide` |
-| Пользователь нажимает переключатель «Скрыть все приложения» в настройках | Все ранее раскрытые приложения повторно скрыты; переключатель возвращается к «Раскрыть все приложения» | `rehideAll()` — читает снимок, устанавливает `hidden=true` для каждого (пропускает удалённые/деинсталлированные), очищает снимок |
-| Пользователь экспортирует настройки | JSON-файл сохранён через системный диалог выбора файла | `exportSettings()` → `ACTION_CREATE_DOCUMENT` → запись JSON |
-| Пользователь импортирует настройки | Диалог подтверждения → текущие настройки заменены, отсутствующие пакеты пропущены | `importSettings()` → `ACTION_OPEN_DOCUMENT` → очистка → добавление + скрытие |
-| Импорт с отсутствующими приложениями | Отсутствующие пакеты пропускаются, остальные импортируются | `pm.getPackageInfo()` проверяет наличие перед добавлением |
+| Пользователь нажимает горячую клавишу Lokker | Запрос PIN/биометрии → открывается интерфейс Lokker | `onKeyEvent` → `checkHotkeys()` → `AuthActivity` → `MainActivity` |
+| Пользователь набирает `*#*#565537#*#*` | То же, что горячая клавиша | `SecretCodeReceiver` → `AuthActivity` |
+| Пользователь набирает `*#*#5655377469#*#*` | **Все** скрытые пакеты устройства раскрыты, без аутентификации; Toast «Lokker: all apps unhidden» | `unhideAllSystemWide()` |
+| Пользователь открывает Lokker повторно (после Home) | Снова запрашивается PIN | `MainActivity.onStop()` сбрасывает `authenticated` |
+| Пользователь запускает скрытое приложение из списка Lokker | Приложение запускается (PIN уже введён) | `unhideTemporarily()` → `launchHiddenApp()` |
+| Горячая клавиша приложения | PIN → приложение запускается | `AuthActivity` → `unhideTemporarily()` или `unhideUntilClosed()` (если `hotkeyUntilClosed`) |
+| **Пользователь уходит с временно раскрытого приложения** (Home, Назад, Недавние, другое приложение) | **Приложение сразу скрывается и удаляется из недавних** | **`TYPE_WINDOW_STATE_CHANGED` → `rehideApp()` + `removeFromRecents()`** |
+| Появилась клавиатура / шторка в скрытом приложении | Приложение **не** скрывается | IME и `com.android.systemui` игнорируются |
+| Приложение в режиме «до закрытия», пользователь переключается | Приложение остаётся видимым и в недавних | Нет `EXCLUDE_FROM_RECENTS`, нет повторного скрытия по фокусу |
+| Приложение в режиме «до закрытия», пользователь смахивает задачу | Приложение скрывается (в пределах ~3 с) | `onTaskRemoved` / опрос 3 с → `checkRehideOnClose()` → `rehideClosedApp()` |
+| Скрытое приложение пытается отправить уведомление | **Невозможно** — скрытое приложение не может работать | `setApplicationHiddenSetting` блокирует запуск всех компонентов |
+| Скрытое приложение обновлено системой | Остаётся скрытым | Система сохраняет состояние; `PackageMonitor` повторно применяет скрытие |
+| Lokker переустановлен/обновлён | Lokker виден в лаунчере, `self_hidden` сброшен | `PackageMonitor` обнаруживает свой пакет; alias возвращается к значению из манифеста |
+| Устройство перезагружается | Все скрытые приложения остаются скрытыми | `packages.xml`; `BootReceiver` повторно применяет скрытие |
+| Экран включается | Состояние скрытия перепроверено | `ScreenReceiver` (SCREEN_ON) |
+| Процесс Lokker убит во время раскрытия (любого режима) | **Приложение повторно скрывается при следующем старте процесса** | `pending_rehide` / `pending_rehide_on_close` → `recoverLeakedApps()` |
+| Пользователь добавляет приложения через экран выбора | Приложения добавлены **и сразу скрыты** | `addApplication()` + `hideApp()` |
+| ⋮ → «Remove from Lokker» | Подтверждение → приложение раскрыто и удалено из Lokker | `removeApplication()` |
+| ⋮ → «Unhide until closed» | Приложение запускается в режиме «до закрытия» | `unhideUntilClosed()` → `launchHiddenApp(pkg, false)` |
+| Переназначатель (KeyMapper) вызывает ярлык Lokker | PIN → временное раскрытие → запуск → повторное скрытие | `CreateShortcutActivity`-intent → `AuthActivity` (`lokker://launch/{pkg}`) |
+| Настройки → «Unhide all apps» | Все скрытые приложения раскрыты, остаются в Lokker; снимок сохранён | `unhideAll()` |
+| Настройки → «Hide all apps» | Приложения из снимка снова скрыты | `rehideAll()` (пропускает удалённые из Lokker и с устройства) |
+| Включение самоскрытия без горячей клавиши | Отказ, Toast «Set up a hotkey first» | `setSelfHidden()` → `IllegalStateException` |
+| 5 неверных PIN подряд | Блокировка на 30 с с обратным отсчётом | `AuthManager.setLockout()` |
 
 ---
 
@@ -1414,6 +1227,7 @@ packages/apps/Lokker/
     <uses-permission android:name="android.permission.REAL_GET_TASKS"/>
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
     <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS"/>
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT"/>
 </manifest>
 ```
 
@@ -1421,10 +1235,19 @@ packages/apps/Lokker/
 > - `MANAGE_USERS` — требуется для `setApplicationHiddenSetting()` (основной API скрытия)
 > - `CHANGE_COMPONENT_ENABLED_STATE` — используется только для самоскрытия Lokker (activity-alias)
 > - Объявление `NotificationListenerService` не требуется — скрытые приложения не могут отправлять уведомления
+> - `WRITE_SECURE_SETTINGS` — автоматическое включение Accessibility-сервиса и `hidden_api_policy`
+> - `GET_TASKS` и `INSTALL_SHORTCUT` объявлены в манифесте, но в privapp-XML их нет. `INSTALL_SHORTCUT` текущим кодом не используется
 
 ---
 
 ## 15. Фазы разработки
+
+> **Статус:** все фазы выполнены. Релизы отмечены git-тегами:
+> - `Lokker-v1.0` (8bd7837);
+> - `Lokker-v1.1` (125aecf): режим «до закрытия», удаление динамических ярлыков, жесты горячих клавиш (долгое/двойное/тройное/удержание);
+> - `Lokker-v1.2a` (60245e6): ускорение обработки горячих клавиш и подавление автоповторов.
+>
+> После v1.2a добавлено развёртывание через `android_app_import` (f23f430). Ниже исходный план, сохранён для истории.
 
 ### Фаза 1 — Фундамент (~3 дня)
 - Каркас модуля AOSP: `Android.bp` (с `platform_apis: true`), манифест, интеграция сборки
